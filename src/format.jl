@@ -39,6 +39,7 @@ function system_identification(systems)
     sys == 'J' && return "J: QZSS"
     sys == 'I' && return "I: NavIC"
     sys == 'S' && return "S: SBAS"
+    sys == 'M' && return "M: MIXED"
     throw(ArgumentError("Unknown satellite system character '$sys'"))
 end
 

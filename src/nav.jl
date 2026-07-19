@@ -32,10 +32,15 @@ are decoded from the navigation message, so they may become available only
 after the writer is created; the header can be replaced (`writer.header =
 new_header`) any time before the first [`write_ephemeris!`](@ref) call
 writes it out.
+
+`satellite_system` is the system character of a single-constellation file
+(e.g. `'G'`); leave it as `nothing` for a mixed navigation file that may
+carry ephemerides of several constellations.
 """
 Base.@kwdef mutable struct RinexNavHeader
     program::String = "RINEXParser.jl"
     run_by::String = ""
+    satellite_system::Union{Nothing,Char} = nothing
     ionospheric_corrections::Vector{IonosphericCorrection} = IonosphericCorrection[]
     time_system_corrections::Vector{TimeSystemCorrection} = TimeSystemCorrection[]
     leap_seconds::Union{Nothing,Int,NTuple{4,Int}} = nothing
@@ -84,6 +89,77 @@ Base.@kwdef struct GPSEphemeris
 end
 
 system(::GPSEphemeris) = 'G'
+dedupe_key(eph::GPSEphemeris) = (system(eph), eph.prn, eph.iodc, eph.toe)
+clock_coefficients(eph::GPSEphemeris) = (eph.af0, eph.af1, eph.af2)
+orbit_lines(eph::GPSEphemeris) = (
+    (eph.iode, eph.crs, eph.deltan, eph.m0),
+    (eph.cuc, eph.e, eph.cus, eph.sqrt_a),
+    (eph.toe, eph.cic, eph.omega0, eph.cis),
+    (eph.i0, eph.crc, eph.omega, eph.omegadot),
+    (eph.idot, eph.codes_on_l2, eph.week, eph.l2p_data_flag),
+    (eph.sv_accuracy, eph.sv_health, eph.tgd, eph.iodc),
+    (eph.transmission_time, eph.fit_interval),
+)
+
+"""
+    GalileoEphemeris(; kwargs...)
+
+One Galileo I/NAV or F/NAV broadcast ephemeris in the units RINEX expects
+(angles in radians, `sqrt_a` in `√m`, times in seconds of Galileo week).
+Field names follow the RINEX 3.05 Galileo navigation record (Table A15).
+
+`data_sources` encodes the navigation message source and clock reference
+(bit field, Table A15); the default `513` is an I/NAV message from E1-B
+with E5b/E1 clock parameters. `sisa` is the signal-in-space accuracy in
+meters, and `bgd_e5a_e1`/`bgd_e5b_e1` are the broadcast group delays in
+seconds.
+"""
+Base.@kwdef struct GalileoEphemeris
+    prn::Int
+    toc::DateTime
+    af0::Float64
+    af1::Float64
+    af2::Float64
+    iodnav::Float64
+    crs::Float64
+    deltan::Float64
+    m0::Float64
+    cuc::Float64
+    e::Float64
+    cus::Float64
+    sqrt_a::Float64
+    toe::Float64
+    cic::Float64
+    omega0::Float64
+    cis::Float64
+    i0::Float64
+    crc::Float64
+    omega::Float64
+    omegadot::Float64
+    idot::Float64
+    data_sources::Float64 = 513.0
+    week::Float64
+    sisa::Float64
+    sv_health::Float64
+    bgd_e5a_e1::Float64
+    bgd_e5b_e1::Float64
+    transmission_time::Float64
+end
+
+system(::GalileoEphemeris) = 'E'
+dedupe_key(eph::GalileoEphemeris) = (system(eph), eph.prn, eph.iodnav, eph.toe)
+clock_coefficients(eph::GalileoEphemeris) = (eph.af0, eph.af1, eph.af2)
+orbit_lines(eph::GalileoEphemeris) = (
+    (eph.iodnav, eph.crs, eph.deltan, eph.m0),
+    (eph.cuc, eph.e, eph.cus, eph.sqrt_a),
+    (eph.toe, eph.cic, eph.omega0, eph.cis),
+    (eph.i0, eph.crc, eph.omega, eph.omegadot),
+    (eph.idot, eph.data_sources, eph.week),
+    (eph.sisa, eph.sv_health, eph.bgd_e5a_e1, eph.bgd_e5b_e1),
+    (eph.transmission_time,),
+)
+
+const Ephemeris = Union{GPSEphemeris,GalileoEphemeris}
 
 """
     RinexNavWriter(target, header::RinexNavHeader)
@@ -124,7 +200,7 @@ end
 function write_nav_header(writer::RinexNavWriter)
     io = writer.io
     header = writer.header
-    version_type_line(io, "N: GNSS NAV DATA", ('G',))
+    version_type_line(io, "N: GNSS NAV DATA", (something(header.satellite_system, 'M'),))
     program_line(io, header.program, header.run_by)
     for corr in header.ionospheric_corrections
         content = rpad(corr.type, 4) * " " *
@@ -151,14 +227,15 @@ function broadcast_orbit_line(io::IO, values...)
 end
 
 """
-    write_ephemeris!(writer::RinexNavWriter, eph::GPSEphemeris) -> Bool
+    write_ephemeris!(writer::RinexNavWriter, eph) -> Bool
 
-Append one ephemeris record, writing the file header first if necessary.
+Append one ephemeris record ([`GPSEphemeris`](@ref) or
+[`GalileoEphemeris`](@ref)), writing the file header first if necessary.
 Returns whether the record was written (`false` for an ephemeris that was
 already written before).
 """
-function write_ephemeris!(writer::RinexNavWriter, eph::GPSEphemeris)
-    key = (system(eph), eph.prn, eph.iodc, eph.toe)
+function write_ephemeris!(writer::RinexNavWriter, eph::Ephemeris)
+    key = dedupe_key(eph)
     key in writer.written && return false
     writer.header_written || write_nav_header(writer)
     io = writer.io
@@ -173,14 +250,10 @@ function write_ephemeris!(writer::RinexNavWriter, eph::GPSEphemeris)
         lpad(minute(t), 2, '0'), " ",
         lpad(second(t), 2, '0'),
     )
-    println(io, join(Printf.format(FMT_E19_12, v) for v in (eph.af0, eph.af1, eph.af2)))
-    broadcast_orbit_line(io, eph.iode, eph.crs, eph.deltan, eph.m0)
-    broadcast_orbit_line(io, eph.cuc, eph.e, eph.cus, eph.sqrt_a)
-    broadcast_orbit_line(io, eph.toe, eph.cic, eph.omega0, eph.cis)
-    broadcast_orbit_line(io, eph.i0, eph.crc, eph.omega, eph.omegadot)
-    broadcast_orbit_line(io, eph.idot, eph.codes_on_l2, eph.week, eph.l2p_data_flag)
-    broadcast_orbit_line(io, eph.sv_accuracy, eph.sv_health, eph.tgd, eph.iodc)
-    broadcast_orbit_line(io, eph.transmission_time, eph.fit_interval)
+    println(io, join(Printf.format(FMT_E19_12, v) for v in clock_coefficients(eph)))
+    for line in orbit_lines(eph)
+        broadcast_orbit_line(io, line...)
+    end
     push!(writer.written, key)
     true
 end

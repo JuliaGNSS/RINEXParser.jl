@@ -105,6 +105,7 @@ end
 
 @testset "navigation file" begin
     header = RinexNavHeader(
+        satellite_system = 'G',
         ionospheric_corrections = [
             IonosphericCorrection("GPSA", (1.1176e-8, -7.4506e-9, -5.9605e-8, 1.1921e-7)),
             IonosphericCorrection("GPSB", (9.0112e4, -6.5536e4, -1.3107e5, 4.5875e5)),
@@ -173,4 +174,62 @@ end
             eph.sv_accuracy, eph.sv_health, eph.tgd, eph.iodc,
         ]
     end
+end
+
+@testset "mixed navigation file with Galileo" begin
+    gal = GalileoEphemeris(
+        prn = 3, toc = DateTime(2020, 1, 1, 2, 0, 0),
+        af0 = -5.335765890777e-4, af1 = -8.100187187665e-12, af2 = 0.0,
+        iodnav = 91.0, crs = 74.03125, deltan = 2.900835219221e-9,
+        m0 = -2.421956924348,
+        cuc = 3.362074494362e-6, e = 2.630989672616e-4,
+        cus = 8.752569556236e-6, sqrt_a = 5.440613872528e3,
+        toe = 266400.0, cic = 4.470348358154e-8, omega0 = -2.113594073071,
+        cis = 7.264316082001e-8, i0 = 9.906056228347e-1,
+        crc = 145.71875, omega = 8.529762196642e-2,
+        omegadot = -5.406296899347e-9, idot = 2.575107271162e-10,
+        week = 2086.0, sisa = 3.12, sv_health = 0.0,
+        bgd_e5a_e1 = -8.847936987877e-9, bgd_e5b_e1 = -9.313225746155e-9,
+        transmission_time = 266465.0,
+    )
+    gps = GPSEphemeris(
+        prn = 3, toc = DateTime(2020, 1, 1, 2, 0, 0),
+        af0 = 1.0e-4, af1 = 0.0, af2 = 0.0,
+        iode = 91.0, crs = 0.0, deltan = 0.0, m0 = 0.0,
+        cuc = 0.0, e = 0.01, cus = 0.0, sqrt_a = 5.15e3,
+        toe = 266400.0, cic = 0.0, omega0 = 0.0, cis = 0.0,
+        i0 = 0.97, crc = 0.0, omega = 0.0, omegadot = 0.0,
+        idot = 0.0, week = 2086.0, sv_accuracy = 2.0, sv_health = 0.0,
+        tgd = 0.0, iodc = 91.0, transmission_time = 259218.0,
+    )
+
+    lines = written_lines(RinexNavWriter, RinexNavHeader()) do writer
+        @test write_ephemeris!(writer, gal)
+        @test !write_ephemeris!(writer, gal)
+        # Same PRN/IOD/Toe in another system is a different ephemeris.
+        @test write_ephemeris!(writer, gps)
+    end
+
+    # Without a fixed satellite_system the file is marked as mixed.
+    @test content(lines[1]) == "     3.05           N: GNSS NAV DATA    M: MIXED"
+
+    body = lines[(findfirst(l -> label(l) == "END OF HEADER", lines) + 1):end]
+    @test length(body) == 16
+    @test body[1][1:23] == "E03 2020 01 01 02 00 00"
+    @test body[1][24:42] == "-5.335765890777E-04"
+    # Line 5 carries IDOT, data sources (I/NAV E1-B default), GAL week.
+    @test strip(body[6]) ==
+          "2.575107271162E-10 5.130000000000E+02 2.086000000000E+03"
+    @test strip(body[8]) == "2.664650000000E+05"
+    @test body[9][1:3] == "G03"
+    # Round-trip the Galileo orbit fields.
+    values = [parse(Float64, body[l][c:c+18]) for l in 2:5 for c in (5, 24, 43, 62)]
+    @test values ≈ [
+        gal.iodnav, gal.crs, gal.deltan, gal.m0,
+        gal.cuc, gal.e, gal.cus, gal.sqrt_a,
+        gal.toe, gal.cic, gal.omega0, gal.cis,
+        gal.i0, gal.crc, gal.omega, gal.omegadot,
+    ]
+    @test parse.(Float64, [body[7][c:c+18] for c in (5, 24, 43, 62)]) ≈
+          [gal.sisa, gal.sv_health, gal.bgd_e5a_e1, gal.bgd_e5b_e1]
 end
