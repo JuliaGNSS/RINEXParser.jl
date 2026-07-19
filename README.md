@@ -12,9 +12,10 @@ epochs stream as they happen, ephemerides are written event-driven and
 deduplicated). Output has been cross-validated against RTKLIB's RINEX
 reader.
 
-Currently GPS is implemented; the record types carry the satellite-system
-character throughout, so other constellations can be added without breaking
-the API.
+GPS and Galileo are implemented (matching the constellations supported by
+GNSSSignals.jl); the record types carry the satellite-system character
+throughout, so further constellations can be added without breaking the
+API.
 
 ## Observation files
 
@@ -76,9 +77,17 @@ RinexNavWriter("data.nav", header) do writer
 end
 ```
 
-`write_ephemeris!` skips ephemerides it has already written (same PRN,
-IODC, and time of ephemeris), so it is safe to forward every decoded
-navigation frame. The nav header is also written lazily, and
+Galileo I/NAV and F/NAV ephemerides are written with `GalileoEphemeris`
+(RINEX Table A15: `iodnav`, `data_sources`, `sisa`, `bgd_e5a_e1`,
+`bgd_e5b_e1`, ...); the Klobuchar-style NeQuick coefficients go into an
+`IonosphericCorrection("GAL", (ai0, ai1, ai2, 0.0))` header record. A
+navigation file containing several constellations is marked `M: MIXED`
+automatically; set `satellite_system = 'G'` in `RinexNavHeader` for a
+single-system file.
+
+`write_ephemeris!` skips ephemerides it has already written (same
+satellite, issue-of-data, and time of ephemeris), so it is safe to forward
+every decoded navigation frame. The nav header is also written lazily, and
 `writer.header` may be updated until the first ephemeris is written — 
 useful when ionosphere/UTC parameters decode later than the first
 ephemeris.
