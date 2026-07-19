@@ -1,0 +1,19 @@
+name = "RINEX"
+uuid = "28565f2c-cea1-4611-871d-1d57561f65b6"
+authors = ["Soeren Schoenbrod <soeren.schoenbrod@juliahub.com>"]
+version = "0.1.0"
+
+[deps]
+Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
+Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
+
+[compat]
+Dates = "1"
+Printf = "1"
+julia = "1.10"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]
