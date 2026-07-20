@@ -1,4 +1,4 @@
-# RINEX.jl
+# RINEXParser.jl
 
 Streaming writer for RINEX 3.05 GNSS files: observation files (pseudorange,
 carrier phase, Doppler, signal strength) and navigation files (broadcast
@@ -19,7 +19,7 @@ the API.
 ## Observation files
 
 ```julia
-using RINEX, Dates
+using RINEXParser, Dates
 
 header = RinexObsHeader(
     marker_name = "ROOF-1",

@@ -14,7 +14,7 @@ to keep the system order deterministic:
 first epoch passed to [`write_epoch!`](@ref).
 """
 Base.@kwdef struct RinexObsHeader
-    program::String = "RINEX.jl"
+    program::String = "RINEXParser.jl"
     run_by::String = ""
     marker_name::String = "UNKNOWN"
     marker_type::String = "GEODETIC"

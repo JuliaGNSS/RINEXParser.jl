@@ -34,7 +34,7 @@ new_header`) any time before the first [`write_ephemeris!`](@ref) call
 writes it out.
 """
 Base.@kwdef mutable struct RinexNavHeader
-    program::String = "RINEX.jl"
+    program::String = "RINEXParser.jl"
     run_by::String = ""
     ionospheric_corrections::Vector{IonosphericCorrection} = IonosphericCorrection[]
     time_system_corrections::Vector{TimeSystemCorrection} = TimeSystemCorrection[]
