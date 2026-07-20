@@ -1,6 +1,6 @@
 using Test
 using Dates
-using RINEX
+using RINEXParser
 
 function written_lines(f, writer_type, args...)
     io = IOBuffer()

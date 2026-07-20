@@ -1,4 +1,4 @@
-module RINEX
+module RINEXParser
 
 using Dates
 using Printf
@@ -13,4 +13,4 @@ include("format.jl")
 include("obs.jl")
 include("nav.jl")
 
-end
+end # module RINEXParser
