@@ -4,8 +4,13 @@ using Dates
 using Printf
 
 export RinexObsHeader, ObsValue, SatObs, ObsEpoch, RinexObsWriter, write_epoch!
-export RinexNavHeader, IonosphericCorrection, TimeSystemCorrection, GPSEphemeris,
-    GalileoEphemeris, RinexNavWriter, write_ephemeris!
+export RinexNavHeader,
+    IonosphericCorrection,
+    TimeSystemCorrection,
+    GPSEphemeris,
+    GalileoEphemeris,
+    RinexNavWriter,
+    write_ephemeris!
 
 const RINEX_VERSION = 3.05
 
