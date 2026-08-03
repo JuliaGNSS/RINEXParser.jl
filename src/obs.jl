@@ -78,9 +78,13 @@ struct ObsEpoch
     clock_offset::Union{Nothing,Float64}
     satellites::Vector{SatObs}
 end
-ObsEpoch(time::DateTime, satellites::AbstractVector{SatObs};
-    fractional_second = 0.0, flag = 0, clock_offset = nothing) =
-    ObsEpoch(time, fractional_second, flag, clock_offset, collect(satellites))
+ObsEpoch(
+    time::DateTime,
+    satellites::AbstractVector{SatObs};
+    fractional_second = 0.0,
+    flag = 0,
+    clock_offset = nothing,
+) = ObsEpoch(time, fractional_second, flag, clock_offset, collect(satellites))
 
 """
     RinexObsWriter(target, header::RinexObsHeader)
@@ -100,9 +104,14 @@ mutable struct RinexObsWriter{T<:IO}
     header_written::Bool
     owns_io::Bool
 end
-RinexObsWriter(io::IO, header::RinexObsHeader) = RinexObsWriter(io, header, false, false)
-RinexObsWriter(path::AbstractString, header::RinexObsHeader) =
+function RinexObsWriter(io::IO, header::RinexObsHeader)
+    check_obs_header(header)
+    RinexObsWriter(io, header, false, false)
+end
+function RinexObsWriter(path::AbstractString, header::RinexObsHeader)
+    check_obs_header(header)
     RinexObsWriter(open(path, "w"), header, false, true)
+end
 
 function RinexObsWriter(f::Function, target, header::RinexObsHeader)
     writer = RinexObsWriter(target, header)
@@ -113,10 +122,18 @@ function RinexObsWriter(f::Function, target, header::RinexObsHeader)
     end
 end
 
+# Checked when the writer is created, so an unknown system character does
+# not surface from the lazy header write inside `close`.
+check_obs_header(header::RinexObsHeader) =
+    foreach(check_satellite_system, first.(header.obs_types))
+
 function Base.close(writer::RinexObsWriter)
-    # An empty file still gets its header, so it is valid RINEX.
-    writer.header_written || write_obs_header(writer, nothing)
-    writer.owns_io ? close(writer.io) : flush(writer.io)
+    try
+        # An empty file still gets its header, so it is valid RINEX.
+        writer.header_written || write_obs_header(writer, nothing)
+    finally
+        writer.owns_io ? close(writer.io) : flush(writer.io)
+    end
     nothing
 end
 
@@ -133,7 +150,8 @@ function write_obs_header(writer::RinexObsWriter, first_epoch_time)
     header_line(io, rpad(header.observer, 20) * header.agency, "OBSERVER / AGENCY")
     header_line(
         io,
-        rpad(header.receiver_number, 20) * rpad(header.receiver_type, 20) *
+        rpad(header.receiver_number, 20) *
+        rpad(header.receiver_type, 20) *
         header.receiver_version,
         "REC # / TYPE / VERS",
     )
@@ -156,10 +174,15 @@ function write_obs_header(writer::RinexObsWriter, first_epoch_time)
     time_of_first_obs = something(header.time_of_first_obs, first_epoch_time, missing)
     if !ismissing(time_of_first_obs)
         t = time_of_first_obs
-        content = lpad(year(t), 6) * lpad(month(t), 6) * lpad(day(t), 6) *
-                  lpad(hour(t), 6) * lpad(minute(t), 6) *
-                  Printf.format(FMT_F13_7, epoch_seconds(t, 0.0)) *
-                  " "^5 * "GPS"
+        content =
+            lpad(year(t), 6) *
+            lpad(month(t), 6) *
+            lpad(day(t), 6) *
+            lpad(hour(t), 6) *
+            lpad(minute(t), 6) *
+            Printf.format(FMT_F13_7, epoch_seconds(t, 0.0)) *
+            " "^5 *
+            "GPS"
         header_line(io, content, "TIME OF FIRST OBS")
     end
     # Zero phase shift for every carrier-phase observable (mandatory record).
@@ -191,13 +214,18 @@ function write_epoch!(writer::RinexObsWriter, epoch::ObsEpoch)
     print(
         io,
         "> ",
-        lpad(year(t), 4), " ",
-        lpad(month(t), 2, '0'), " ",
-        lpad(day(t), 2, '0'), " ",
-        lpad(hour(t), 2, '0'), " ",
+        lpad(year(t), 4),
+        " ",
+        lpad(month(t), 2, '0'),
+        " ",
+        lpad(day(t), 2, '0'),
+        " ",
+        lpad(hour(t), 2, '0'),
+        " ",
         lpad(minute(t), 2, '0'),
         Printf.format(FMT_F11_7, epoch_seconds(t, epoch.fractional_second)),
-        "  ", epoch.flag,
+        "  ",
+        epoch.flag,
         lpad(length(epoch.satellites), 3),
     )
     if !isnothing(epoch.clock_offset)
@@ -206,18 +234,22 @@ function write_epoch!(writer::RinexObsWriter, epoch::ObsEpoch)
     println(io)
     for sat in epoch.satellites
         expected = length(obs_types_for(writer.header, sat.system))
-        length(sat.observations) == expected || throw(ArgumentError(
-            "Satellite $(satellite_id(sat.system, sat.prn)) carries " *
-            "$(length(sat.observations)) observations, but the header declares " *
-            "$expected observation types for system '$(sat.system)'",
-        ))
+        length(sat.observations) == expected || throw(
+            ArgumentError(
+                "Satellite $(satellite_id(sat.system, sat.prn)) carries " *
+                "$(length(sat.observations)) observations, but the header declares " *
+                "$expected observation types for system '$(sat.system)'",
+            ),
+        )
         # Full-width lines (no trailing-blank trimming) for the benefit of
         # fixed-column parsers, matching RTKLIB and GNSS-SDR output.
         line = satellite_id(sat.system, sat.prn)
         for obs in sat.observations
-            line *= isnothing(obs) ? " "^16 :
-                    Printf.format(FMT_F14_3, obs.value) * indicator(obs.lli) *
-                    indicator(obs.ssi)
+            line *=
+                isnothing(obs) ? " "^16 :
+                Printf.format(FMT_F14_3, obs.value) *
+                indicator(obs.lli) *
+                indicator(obs.ssi)
         end
         println(io, line)
     end

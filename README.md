@@ -22,7 +22,7 @@ API.
 ```julia
 using RINEXParser, Dates
 
-header = RinexObsHeader(
+header = RinexObsHeader(;
     marker_name = "ROOF-1",
     receiver_type = "GNSSReceiver.jl",
     antenna_type = "UNKNOWN",
@@ -33,18 +33,25 @@ header = RinexObsHeader(
 )
 
 RinexObsWriter("data.obs", header) do writer
-    write_epoch!(writer, ObsEpoch(
-        DateTime(2020, 1, 1, 0, 0, 30),                   # GPS time
-        [
-            SatObs('G', 2, [
-                ObsValue(21234567.890),                   # pseudorange [m]
-                ObsValue(111583948.752, lli = 0, ssi = 7),# carrier [cycles]
-                ObsValue(-1234.567),                      # Doppler [Hz]
-                ObsValue(45.2),                           # C/N0 [dB-Hz]
-            ]),
-        ],
-        clock_offset = -1.2e-4,                           # receiver clock [s]
-    ))
+    write_epoch!(
+        writer,
+        ObsEpoch(
+            DateTime(2020, 1, 1, 0, 0, 30),                   # GPS time
+            [
+                SatObs(
+                    'G',
+                    2,
+                    [
+                        ObsValue(21234567.890),                   # pseudorange [m]
+                        ObsValue(111583948.752; lli = 0, ssi = 7),# carrier [cycles]
+                        ObsValue(-1234.567),                      # Doppler [Hz]
+                        ObsValue(45.2),                           # C/N0 [dB-Hz]
+                    ],
+                ),
+            ];
+            clock_offset = -1.2e-4,                           # receiver clock [s]
+        ),
+    )
 end
 ```
 
@@ -83,14 +90,22 @@ Galileo I/NAV and F/NAV ephemerides are written with `GalileoEphemeris`
 `IonosphericCorrection("GAL", (ai0, ai1, ai2, 0.0))` header record. A
 navigation file containing several constellations is marked `M: MIXED`
 automatically; set `satellite_system = 'G'` in `RinexNavHeader` for a
-single-system file.
+single-system file, which then rejects ephemerides of other
+constellations.
 
 `write_ephemeris!` skips ephemerides it has already written (same
-satellite, issue-of-data, and time of ephemeris), so it is safe to forward
-every decoded navigation frame. The nav header is also written lazily, and
-`writer.header` may be updated until the first ephemeris is written — 
-useful when ionosphere/UTC parameters decode later than the first
-ephemeris.
+satellite, issue-of-data, time of ephemeris, and for Galileo the
+navigation message source, since I/NAV and F/NAV are separate records), so
+it is safe to forward every decoded navigation frame. The nav header is
+also written lazily, and `writer.header` may be updated until the first
+ephemeris is written, which is useful when ionosphere/UTC parameters
+decode later than the first ephemeris.
+
+`write_ephemeris!` accepts any ephemeris type, so a constellation that is
+not modelled yet can be written by implementing the ephemeris interface -
+`RINEXParser.system`, `RINEXParser.dedupe_key`, `RINEXParser.orbit_lines`
+and optionally `RINEXParser.clock_coefficients`, see
+`?write_ephemeris!`.
 
 ## Epoch timing conventions
 
