@@ -36,17 +36,16 @@ RinexObsWriter("data.obs", header) do writer
     write_epoch!(
         writer,
         ObsEpoch(
-            DateTime(2020, 1, 1, 0, 0, 30),                   # GPS time
+            DateTime(2020, 1, 1, 0, 0, 30),                   # epoch in GPS time
             [
                 SatObs(
+                    writer,
                     'G',
                     2,
-                    [
-                        ObsValue(21234567.890),                   # pseudorange [m]
-                        ObsValue(111583948.752; lli = 0, ssi = 7),# carrier [cycles]
-                        ObsValue(-1234.567),                      # Doppler [Hz]
-                        ObsValue(45.2),                           # C/N0 [dB-Hz]
-                    ],
+                    "C1C" => 21234567.890,                        # pseudorange [m]
+                    "L1C" => ObsValue(111583948.752; lli = 0, ssi = 7), # carrier [cycles]
+                    "D1C" => -1234.567,                           # Doppler [Hz]
+                    "S1C" => 45.2,                                # C/N0 [dB-Hz]
                 ),
             ];
             clock_offset = -1.2e-4,                           # receiver clock [s]
@@ -55,10 +54,33 @@ RinexObsWriter("data.obs", header) do writer
 end
 ```
 
-Each satellite's observation vector is aligned with the header's
-`obs_types` for its system; use `nothing` for missing observations. The
-header is written when the first epoch arrives, so `time_of_first_obs` is
-filled in automatically.
+Observations are addressed by observation descriptor, in any order and
+without mentioning the types a satellite has no measurement for; `SatObs`
+takes the alignment from the header (passed directly or through the writer)
+and cannot misalign them. A value is a plain number, an `ObsValue` carrying
+the loss-of-lock and signal-strength indicators, or `nothing`. The
+positional form `SatObs('G', 2, [ObsValue(...), nothing, ...])`, aligned
+with the header's `obs_types` for the system, also remains available.
+
+`RinexObsHeader` is mutable and the header is written when the first epoch
+arrives, so `time_of_first_obs` is filled in automatically and fields that
+the data provides late can be assigned until then:
+
+```julia
+writer.header.approx_position = position   # from the first PVT solution
+writer.header.leap_seconds = leap_seconds  # decoded from the navigation message
+```
+
+The file is written in the time system of its constellation (`GPS`, `GAL`,
+`BDT`, ...), and a file carrying several constellations in GPS time, as
+RINEX prescribes for mixed files.
+
+An observation whose value is not finite is written as a blank field, the
+RINEX encoding of "no measurement", instead of as `NaN` in a numeric field.
+A finite value too wide for its 14 columns - or an indicator, satellite
+number or clock offset too wide for its own field - is rejected with an
+`ArgumentError`, because writing it would shift the rest of the record and
+leave a file that parses but is silently wrong.
 
 ## Navigation files
 
@@ -87,8 +109,16 @@ end
 Galileo I/NAV and F/NAV ephemerides are written with `GalileoEphemeris`
 (RINEX Table A15: `iodnav`, `data_sources`, `sisa`, `bgd_e5a_e1`,
 `bgd_e5b_e1`, ...); the Klobuchar-style NeQuick coefficients go into an
-`IonosphericCorrection("GAL", (ai0, ai1, ai2, 0.0))` header record. A
-navigation file containing several constellations is marked `M: MIXED`
+`IonosphericCorrection("GAL", (ai0, ai1, ai2, 0.0))` header record. The two
+bit fields of that record are assembled by `galileo_data_sources` and
+`galileo_sv_health` rather than by hand:
+
+```julia
+data_sources = galileo_data_sources(; inav_e1b = true, clock_e5b_e1 = true)  # 513
+sv_health = galileo_sv_health(; e1b_dvs = 1, e1b_hs = 1)                     # 3
+```
+
+A navigation file containing several constellations is marked `M: MIXED`
 automatically; set `satellite_system = 'G'` in `RinexNavHeader` for a
 single-system file, which then rejects ephemerides of other
 constellations.
@@ -100,6 +130,10 @@ it is safe to forward every decoded navigation frame. The nav header is
 also written lazily, and `writer.header` may be updated until the first
 ephemeris is written, which is useful when ionosphere/UTC parameters
 decode later than the first ephemeris.
+
+Unlike an observation, a navigation record field has no blank encoding that
+would mean "not available", so an ephemeris carrying a value that is not
+finite is rejected instead of writing `NaN` into a numeric field.
 
 `write_ephemeris!` accepts any ephemeris type, so a constellation that is
 not modelled yet can be written by implementing the ephemeris interface -

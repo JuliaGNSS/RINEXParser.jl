@@ -9,6 +9,8 @@ export RinexNavHeader,
     TimeSystemCorrection,
     GPSEphemeris,
     GalileoEphemeris,
+    galileo_data_sources,
+    galileo_sv_health,
     RinexNavWriter,
     write_ephemeris!
 

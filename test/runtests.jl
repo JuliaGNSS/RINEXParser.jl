@@ -1,5 +1,6 @@
 using Test
 using Dates
+using Printf
 using RINEXParser
 
 function written_lines(f, writer_type, args...)
@@ -220,6 +221,158 @@ RINEXParser.orbit_lines(eph::MinimalEphemeris) = ((eph.toe,),)
         writer = RinexObsWriter(IOBuffer(), header)
         @test_throws ArgumentError write_epoch!(writer, bad)
     end
+
+    @testset "observations addressed by observation type" begin
+        # The same satellite record as above, built from descriptors in an
+        # order of its own instead of the header's.
+        same(a::SatObs, b::SatObs) =
+            a.system == b.system && a.prn == b.prn && a.observations == b.observations
+
+        by_code = SatObs(
+            header,
+            'G',
+            2,
+            "L1C" => ObsValue(111583948.752; lli = 0, ssi = 7),
+            "S1C" => 45.2,
+            "C1C" => 21234567.89,
+            :D1C => -1234.567,
+        )
+        @test same(by_code, first(epoch.satellites))
+
+        # Observation types the header declares but the call does not
+        # mention stay blank, and so does an explicit `nothing`. Any
+        # iterable of pairs works, which is what a receiver collects when
+        # the available observables vary per satellite.
+        sparse = SatObs(
+            header,
+            'G',
+            13,
+            ["C1C" => 23456789.012, "L1C" => nothing, "D1C" => 2345.678, "S1C" => 38.1],
+        )
+        @test same(sparse, last(epoch.satellites))
+        @test SatObs(header, 'G', 7).observations == fill(nothing, 4)
+
+        # A writer stands in for its header, which is what a receiver holds.
+        writer = RinexObsWriter(IOBuffer(), header)
+        @test same(
+            SatObs(writer, 'G', 2, "C1C" => 21234567.89),
+            SatObs(header, 'G', 2, "C1C" => 21234567.89),
+        )
+
+        @test_throws ArgumentError SatObs(header, 'G', 2, "C2W" => 1.0)
+        @test_throws ArgumentError SatObs(header, 'E', 2, "C1C" => 1.0)
+        @test_throws ArgumentError SatObs(header, 'G', 2, "C1C" => 1.0, "C1C" => 2.0)
+        # Neither half of a pair falls through to a conversion error.
+        @test_throws ArgumentError SatObs(header, 'G', 2, 1 => 1.0)
+        @test_throws ArgumentError SatObs(header, 'G', 2, "C1C" => "21234567.890")
+        @test_throws ArgumentError SatObs(header, 'G', 2, [ObsValue(1.0)])
+    end
+
+    @testset "the header can be completed until it is written" begin
+        lazy = RinexObsHeader(obs_types = ['G' => ["C1C"]])
+        lines = written_lines(RinexObsWriter, lazy) do writer
+            writer.header.approx_position = (4141446.0044, 604023.0011, 4796597.5545)
+            writer.header.leap_seconds = 18
+            writer.header.marker_name = "ROOF-1"
+            write_epoch!(writer, ObsEpoch(DateTime(2020, 1, 1), SatObs[]))
+        end
+        @test content(lines[findfirst(l -> label(l) == "MARKER NAME", lines)]) == "ROOF-1"
+        @test content(lines[findfirst(l -> label(l) == "APPROX POSITION XYZ", lines)]) ==
+              "  4141446.0044   604023.0011  4796597.5545"
+        @test !isnothing(findfirst(l -> label(l) == "LEAP SECONDS", lines))
+    end
+
+    @testset "the time system follows the constellation" begin
+        function time_system(obs_types)
+            lines = written_lines(
+                w -> write_epoch!(w, ObsEpoch(DateTime(2020, 1, 1), SatObs[])),
+                RinexObsWriter,
+                RinexObsHeader(; obs_types),
+            )
+            record = only(filter(l -> label(l) == "TIME OF FIRST OBS", lines))
+            last(split(content(record)))
+        end
+        @test time_system(['G' => ["C1C"]]) == "GPS"
+        @test time_system(['E' => ["C1C"]]) == "GAL"
+        @test time_system(['C' => ["C1C"]]) == "BDT"
+        # A mixed file is written in GPS time.
+        @test time_system(['G' => ["C1C"], 'E' => ["C1C"]]) == "GPS"
+    end
+
+    @testset "a record is never silently shifted out of alignment" begin
+        write_value(value; kwargs...) = body_lines(
+            written_lines(
+                w -> write_epoch!(
+                    w,
+                    ObsEpoch(
+                        DateTime(2020, 1, 1),
+                        [SatObs('G', 1, [ObsValue(value; kwargs...)])],
+                    ),
+                ),
+                RinexObsWriter,
+                RinexObsHeader(obs_types = ['G' => ["C1C"]]),
+            ),
+        )[2]
+
+        # A measurement that is not available leaves its field blank, which
+        # is what RINEX means by "no observation" - "NaN" would keep the
+        # columns aligned and be read back as a number.
+        @test write_value(NaN) == "G01" * " "^16
+        @test write_value(Inf; lli = 0, ssi = 7) == "G01" * " "^16
+        # The widest value the field holds, and the first one it does not.
+        @test write_value(9999999999.999) == "G01" * "9999999999.999" * "  "
+        @test write_value(-999999999.999) == "G01" * "-999999999.999" * "  "
+        @test_throws ArgumentError write_value(1e10)
+        @test_throws ArgumentError write_value(-1e9)
+        # An indicator holds a single column, so any digit passes - a
+        # receiver reports ssi = 0 for a signal strength it does not have -
+        # and anything wider does not.
+        @test write_value(1.0; lli = 0, ssi = 0) == "G01" * "         1.000" * "00"
+        @test_throws ArgumentError ObsValue(1.0; lli = 10)
+        @test_throws ArgumentError ObsValue(1.0; ssi = -1)
+        # The seconds of the epoch record are a fixed field like any other.
+        seconds(fractional_second) = write_epoch!(
+            RinexObsWriter(IOBuffer(), RinexObsHeader(obs_types = ['G' => ["C1C"]])),
+            ObsEpoch(DateTime(2020, 1, 1), SatObs[]; fractional_second),
+        )
+        @test isnothing(seconds(1.0e-5))
+        @test_throws ArgumentError seconds(NaN)
+        # So does the receiver clock offset of the epoch record.
+        offset(value) = write_epoch!(
+            RinexObsWriter(IOBuffer(), RinexObsHeader(obs_types = ['G' => ["C1C"]])),
+            ObsEpoch(DateTime(2020, 1, 1), SatObs[]; clock_offset = value),
+        )
+        @test isnothing(offset(-0.999))
+        @test_throws ArgumentError offset(100.0)
+        # And so does the two-column satellite number.
+        @test_throws ArgumentError write_epoch!(
+            RinexObsWriter(IOBuffer(), RinexObsHeader(obs_types = ['G' => ["C1C"]])),
+            ObsEpoch(DateTime(2020, 1, 1), [SatObs('G', 100, [ObsValue(1.0)])]),
+        )
+    end
+
+    @testset "epochs are written without allocating per field" begin
+        many = RinexObsHeader(
+            obs_types = ['G' => ["C1C", "L1C", "D1C", "S1C", "C5Q", "L5Q", "D5Q", "S5Q"]],
+        )
+        sats = [
+            SatObs(
+                many,
+                'G',
+                prn,
+                (code => 2.1e7 + prn for code in last(many.obs_types[1]))...,
+            ) for prn = 1:30
+        ]
+        epoch = ObsEpoch(DateTime(2020, 1, 1), sats; clock_offset = -1.2e-4)
+        writer = RinexObsWriter(devnull, many)
+        write_epoch!(writer, epoch)                       # compile and write the header
+        allocated = @allocated for _ = 1:10
+            write_epoch!(writer, epoch)
+        end
+        # A per-field string would be some 90 kB for these 240 observations;
+        # the record buffer needs none of it.
+        @test allocated / 10 < 1024
+    end
 end
 
 @testset "navigation file" begin
@@ -380,6 +533,76 @@ end
     @test_throws ArgumentError close(writer)
     @test !isopen(writer.io)
     rm(path, force = true)
+end
+
+@testset "Table A15 bit fields" begin
+    # The two records of a Galileo receiver: I/NAV from E1-B with the
+    # E5b/E1 clock parameters, F/NAV from E5a-I with the E5a/E1 ones.
+    @test galileo_data_sources(; inav_e1b = true, clock_e5b_e1 = true) == 513.0
+    @test galileo_data_sources(; fnav_e5a = true, clock_e5a_e1 = true) == 258.0
+    # I/NAV decoded from both of its carriers.
+    @test galileo_data_sources(; inav_e1b = true, inav_e5b = true, clock_e5b_e1 = true) ==
+          517.0
+    # The default of GalileoEphemeris is the I/NAV record.
+    @test gal_eph.data_sources ==
+          galileo_data_sources(; inav_e1b = true, clock_e5b_e1 = true)
+    # A record needs a message source and exactly one clock reference.
+    @test_throws ArgumentError galileo_data_sources(; clock_e5b_e1 = true)
+    @test_throws ArgumentError galileo_data_sources(; inav_e1b = true)
+    @test_throws ArgumentError galileo_data_sources(;
+        inav_e1b = true,
+        clock_e5a_e1 = true,
+        clock_e5b_e1 = true,
+    )
+
+    @test galileo_sv_health() == 0.0
+    # E1-B data invalid and out of service, E5a/E5b healthy.
+    @test galileo_sv_health(; e1b_dvs = 1, e1b_hs = 1) == 3.0
+    # Every field of the packed word, in its own bits.
+    @test galileo_sv_health(; e5a_dvs = 1) == 8.0
+    @test galileo_sv_health(; e5a_hs = 3) == 48.0
+    @test galileo_sv_health(; e5b_dvs = 1) == 64.0
+    @test galileo_sv_health(; e5b_hs = 3) == 384.0
+    @test_throws ArgumentError galileo_sv_health(; e1b_dvs = 2)
+    @test_throws ArgumentError galileo_sv_health(; e5b_hs = 4)
+end
+
+@testset "an ephemeris record is never shifted out of alignment either" begin
+    writer = RinexNavWriter(IOBuffer())
+    # A navigation record field has no blank encoding, so a value that is
+    # not finite is an error rather than a missing measurement.
+    @test_throws ArgumentError write_ephemeris!(writer, modify(gps_eph; af1 = NaN))
+    @test_throws ArgumentError write_ephemeris!(writer, modify(gps_eph; sqrt_a = Inf))
+    @test_throws ArgumentError write_ephemeris!(writer, modify(gal_eph; sisa = NaN))
+    @test_throws ArgumentError write_ephemeris!(writer, modify(gps_eph; prn = 100))
+    # E19.12 holds a two-digit exponent, and a three-digit one only without
+    # a sign: -1e-100 takes 20 columns where 1e-100 takes 19.
+    @test_throws ArgumentError write_ephemeris!(writer, modify(gps_eph; crs = -1e-100))
+    @test_throws ArgumentError write_ephemeris!(writer, modify(gps_eph; af0 = -1.5e100))
+    lines = written_lines(RinexNavWriter, RinexNavHeader()) do w
+        @test write_ephemeris!(w, modify(gps_eph; crs = 1e-100))
+    end
+    @test body_lines(lines)[2][24:42] == "1.000000000000E-100"
+
+    @testset "the record buffer reserves what a format can produce" begin
+        # Every value of every record format, not only the ones the guards
+        # above let through, fits the room a field reserves in the buffer.
+        extremes = (
+            floatmax(Float64),
+            -floatmax(Float64),
+            5.0e-324,
+            -5.0e-324,
+            0.0,
+            NaN,
+            Inf,
+            -Inf,
+            -1.0,
+        )
+        @test all(
+            length(Printf.format(format, value)) <= RINEXParser.MAX_FIELD_WIDTH for
+            format in RINEXParser.RECORD_FORMATS, value in extremes
+        )
+    end
 end
 
 @testset "an unknown constellation only needs the ephemeris interface" begin

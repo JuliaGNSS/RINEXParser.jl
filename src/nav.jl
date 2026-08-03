@@ -107,10 +107,12 @@ One Galileo I/NAV or F/NAV broadcast ephemeris in the units RINEX expects
 Field names follow the RINEX 3.05 Galileo navigation record (Table A15).
 
 `data_sources` encodes the navigation message source and clock reference
-(bit field, Table A15); the default `513` is an I/NAV message from E1-B
-with E5b/E1 clock parameters. `sisa` is the signal-in-space accuracy in
-meters, and `bgd_e5a_e1`/`bgd_e5b_e1` are the broadcast group delays in
-seconds.
+(bit field, Table A15) and `sv_health` packs the per-signal validity and
+health bits; both are assembled by
+[`galileo_data_sources`](@ref) and [`galileo_sv_health`](@ref). The default
+`data_sources = 513` is an I/NAV message from E1-B with E5b/E1 clock
+parameters. `sisa` is the signal-in-space accuracy in meters, and
+`bgd_e5a_e1`/`bgd_e5b_e1` are the broadcast group delays in seconds.
 
 `week` follows the RINEX convention of a continuous week number aligned
 with the GPS week, which is the 12-bit GST week of the navigation message
@@ -147,6 +149,84 @@ Base.@kwdef struct GalileoEphemeris
     bgd_e5b_e1::Float64
     transmission_time::Float64
 end
+
+"""
+    galileo_data_sources(; inav_e1b = false, fnav_e5a = false, inav_e5b = false,
+                           clock_e5a_e1 = false, clock_e5b_e1 = false) -> Float64
+
+The `data_sources` bit field of a [`GalileoEphemeris`](@ref) (RINEX 3.05
+Table A15), assembled from the navigation messages the record was decoded
+from and the signal pair its clock parameters, `toc` and `sisa` refer to.
+
+At least one message source is required, and exactly one clock reference:
+the two Galileo services publish separate clock corrections, so a record
+carries either the E5a/E1 or the E5b/E1 set. The two records a Galileo
+receiver writes are
+
+    galileo_data_sources(; inav_e1b = true, clock_e5b_e1 = true)  # 513, I/NAV
+    galileo_data_sources(; fnav_e5a = true, clock_e5a_e1 = true)  # 258, F/NAV
+
+and an I/NAV record decoded from both of its carriers sets `inav_e1b` and
+`inav_e5b` together.
+"""
+function galileo_data_sources(;
+    inav_e1b::Bool = false,
+    fnav_e5a::Bool = false,
+    inav_e5b::Bool = false,
+    clock_e5a_e1::Bool = false,
+    clock_e5b_e1::Bool = false,
+)
+    inav_e1b ||
+        fnav_e5a ||
+        inav_e5b ||
+        throw(
+            ArgumentError(
+                "A Galileo ephemeris needs at least one navigation message source: " *
+                "inav_e1b, fnav_e5a or inav_e5b",
+            ),
+        )
+    clock_e5a_e1 == clock_e5b_e1 && throw(
+        ArgumentError(
+            "A Galileo ephemeris carries the clock parameters of exactly one signal " *
+            "pair: set either clock_e5a_e1 (F/NAV) or clock_e5b_e1 (I/NAV)",
+        ),
+    )
+    bits =
+        inav_e1b << 0 | fnav_e5a << 1 | inav_e5b << 2 | clock_e5a_e1 << 8 |
+        clock_e5b_e1 << 9
+    Float64(bits)
+end
+
+"""
+    galileo_sv_health(; e1b_dvs = 0, e1b_hs = 0, e5a_dvs = 0, e5a_hs = 0,
+                        e5b_dvs = 0, e5b_hs = 0) -> Float64
+
+The `sv_health` bit field of a [`GalileoEphemeris`](@ref) (RINEX 3.05 Table
+A15), packed from the data validity status (`dvs`, 0 or 1) and health
+status (`hs`, 0-3) of each signal as they are broadcast in the navigation
+message. `galileo_sv_health()` is a satellite healthy on every signal.
+"""
+function galileo_sv_health(;
+    e1b_dvs::Integer = 0,
+    e1b_hs::Integer = 0,
+    e5a_dvs::Integer = 0,
+    e5a_hs::Integer = 0,
+    e5b_dvs::Integer = 0,
+    e5b_hs::Integer = 0,
+)
+    bits =
+        check_health_field(e1b_dvs, "e1b_dvs", 1) << 0 |
+        check_health_field(e1b_hs, "e1b_hs", 3) << 1 |
+        check_health_field(e5a_dvs, "e5a_dvs", 1) << 3 |
+        check_health_field(e5a_hs, "e5a_hs", 3) << 4 |
+        check_health_field(e5b_dvs, "e5b_dvs", 1) << 6 |
+        check_health_field(e5b_hs, "e5b_hs", 3) << 7
+    Float64(bits)
+end
+
+check_health_field(value::Integer, name, largest) =
+    0 <= value <= largest ? Int(value) :
+    throw(ArgumentError("Health field $name is $value, but it holds 0-$largest"))
 
 system(::GalileoEphemeris) = 'E'
 # I/NAV and F/NAV broadcast the same orbit for one IODnav but different
@@ -186,14 +266,15 @@ mutable struct RinexNavWriter{T<:IO}
     owns_io::Bool
     # Keys come from `dedupe_key`, whose shape differs per ephemeris type.
     written::Set{Tuple}
+    record::RecordBuffer
 end
 function RinexNavWriter(io::IO, header::RinexNavHeader = RinexNavHeader())
     check_nav_header(header)
-    RinexNavWriter(io, header, false, false, Set{Tuple}())
+    RinexNavWriter(io, header, false, false, Set{Tuple}(), RecordBuffer())
 end
 function RinexNavWriter(path::AbstractString, header::RinexNavHeader = RinexNavHeader())
     check_nav_header(header)
-    RinexNavWriter(open(path, "w"), header, false, true, Set{Tuple}())
+    RinexNavWriter(open(path, "w"), header, false, true, Set{Tuple}(), RecordBuffer())
 end
 
 function RinexNavWriter(f::Function, target, header::RinexNavHeader = RinexNavHeader())
@@ -251,8 +332,54 @@ function write_nav_header(writer::RinexNavWriter)
     writer.header_written = true
 end
 
-function broadcast_orbit_line(io::IO, values...)
-    println(io, " "^4, join(Printf.format(FMT_E19_12, v) for v in values))
+# Every navigation record field is 19 columns of E19.12, and every value is
+# checked against them like an observation is against its own field. Unlike
+# an observation, an ephemeris field has no blank encoding that would mean
+# "not available", so a value that is not finite can only be an upstream bug
+# and is rejected instead of written as "NaN" into a numeric field.
+function add_orbit_values!(
+    record::RecordBuffer,
+    system::Char,
+    prn::Integer,
+    line_number::Int,
+    values,
+)
+    for (i, value) in enumerate(values)
+        fits_scientific_field(value, 12, 19) ||
+            ephemeris_field_error(system, prn, line_number, i, value)
+        add_field!(record, FMT_E19_12, value)
+    end
+end
+
+# Line 0 is the clock polynomial at the end of the record epoch line.
+@noinline function ephemeris_field_error(system, prn, line_number, i, value)
+    position =
+        line_number == 0 ? "the clock polynomial" : "broadcast orbit line $line_number"
+    reason =
+        isfinite(value) ?
+        "does not fit the 19 columns of an E19.12 field; the rest of the record " *
+        "would be shifted out of alignment" :
+        "is not finite, and a navigation record field has no encoding for a value " *
+        "that is missing"
+    throw(
+        ArgumentError(
+            "Field $i of $position of the ephemeris of satellite " *
+            "$(satellite_id(system, prn)) is $value, which $reason",
+        ),
+    )
+end
+
+function broadcast_orbit_line(
+    io::IO,
+    record::RecordBuffer,
+    system::Char,
+    prn::Integer,
+    line_number::Int,
+    values,
+)
+    add_blanks!(record, 4)
+    add_orbit_values!(record, system, prn, line_number, values)
+    end_record!(io, record)
 end
 
 """
@@ -292,26 +419,19 @@ function write_ephemeris!(writer::RinexNavWriter, eph)
     key in writer.written && return false
     writer.header_written || write_nav_header(writer)
     io = writer.io
+    record = start_record!(writer.record)
+    sys = system(eph)
+    prn = eph.prn
     t = eph.toc
-    print(
-        io,
-        satellite_id(system(eph), eph.prn),
-        " ",
-        lpad(year(t), 4),
-        " ",
-        lpad(month(t), 2, '0'),
-        " ",
-        lpad(day(t), 2, '0'),
-        " ",
-        lpad(hour(t), 2, '0'),
-        " ",
-        lpad(minute(t), 2, '0'),
-        " ",
-        lpad(second(t), 2, '0'),
-    )
-    println(io, join(Printf.format(FMT_E19_12, v) for v in clock_coefficients(eph)))
-    for line in orbit_lines(eph)
-        broadcast_orbit_line(io, line...)
+    add_satellite_id!(record, sys, prn)
+    add_char!(record, ' ')
+    add_epoch_date!(record, t)
+    add_char!(record, ' ')
+    add_integer!(record, second(t), 2, UInt8('0'))
+    add_orbit_values!(record, sys, prn, 0, clock_coefficients(eph))
+    end_record!(io, record)
+    for (line_number, line) in enumerate(orbit_lines(eph))
+        broadcast_orbit_line(io, record, sys, prn, line_number, line)
     end
     push!(writer.written, key)
     true
