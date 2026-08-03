@@ -1,5 +1,12 @@
 # Changelog
 
+# [0.3.0](https://github.com/JuliaGNSS/RINEXParser.jl/compare/v0.2.1...v0.3.0) (2026-08-03)
+
+
+### Features
+
+* address observations by code and guard the fixed-column writers ([6acf6ad](https://github.com/JuliaGNSS/RINEXParser.jl/commit/6acf6addef50d8c6ec9dc7be4f795c5dd5d6e08e))
+
 ## [0.2.1](https://github.com/JuliaGNSS/RINEXParser.jl/compare/v0.2.0...v0.2.1) (2026-08-03)
 
 

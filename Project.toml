@@ -1,7 +1,7 @@
 name = "RINEXParser"
 uuid = "28565f2c-cea1-4611-871d-1d57561f65b6"
 authors = ["Soeren Schoenbrod <soeren.schoenbrod@juliahub.com>"]
-version = "0.2.1"
+version = "0.3.0"
 
 [deps]
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
