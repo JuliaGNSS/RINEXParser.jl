@@ -1,5 +1,12 @@
 # Changelog
 
+# [1.0.0](https://github.com/JuliaGNSS/RINEXParser.jl/compare/v0.4.0...v1.0.0) (2026-08-04)
+
+Same as v0.4.0. No breaking changes.
+
+This release only declares the public API stable, so that from now on version
+numbers follow semantic versioning against a 1.x baseline.
+
 # [0.4.0](https://github.com/JuliaGNSS/RINEXParser.jl/compare/v0.3.0...v0.4.0) (2026-08-04)
 
 
