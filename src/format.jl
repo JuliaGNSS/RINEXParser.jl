@@ -165,19 +165,28 @@ check_satellite_system(sys::Char) =
     throw(ArgumentError("Unknown satellite system character '$sys'"))
 
 """
+    system_character(systems) -> Char
+
+The satellite system a file containing `systems` is written for: the
+character of its constellation if it holds exactly one, `'M'` for a mixed
+file - several systems, or a file that is not pinned to one - otherwise.
+Every character is checked, also in a mixed file where none of them is
+returned.
+"""
+function system_character(systems)
+    foreach(check_satellite_system, systems)
+    length(systems) == 1 ? only(systems) : 'M'
+end
+
+"""
     system_identification(systems) -> String
 
 The satellite-system field of the `RINEX VERSION / TYPE` record, derived
-from the set of system characters contained in the file. A single
-character names its constellation; anything else - several systems, or a
-file that is not pinned to one - is identified as mixed. Every character
-is checked, also in a mixed file where none of them reaches the record.
+from the set of system characters contained in the file.
 """
 function system_identification(systems)
-    foreach(check_satellite_system, systems)
-    length(systems) == 1 || return "M: MIXED"
-    sys = only(systems)
-    string(sys, ": ", SYSTEM_NAMES[sys])
+    sys = system_character(systems)
+    sys == 'M' ? "M: MIXED" : string(sys, ": ", SYSTEM_NAMES[sys])
 end
 
 # Time systems of the constellations, as the three-letter codes of the
