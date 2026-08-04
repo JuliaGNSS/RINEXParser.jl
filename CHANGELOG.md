@@ -1,5 +1,12 @@
 # Changelog
 
+# [0.4.0](https://github.com/JuliaGNSS/RINEXParser.jl/compare/v0.3.0...v0.4.0) (2026-08-04)
+
+
+### Features
+
+* build and parse the RINEX long filenames ([d904008](https://github.com/JuliaGNSS/RINEXParser.jl/commit/d90400827850ba76e968bc95d7be1352648493e4))
+
 # [0.3.0](https://github.com/JuliaGNSS/RINEXParser.jl/compare/v0.2.1...v0.3.0) (2026-08-03)
 
 
