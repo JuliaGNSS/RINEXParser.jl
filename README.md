@@ -2,7 +2,8 @@
 
 Streaming writer for RINEX 3.05 GNSS files: observation files (pseudorange,
 carrier phase, Doppler, signal strength) and navigation files (broadcast
-ephemerides plus ionosphere and time-system corrections).
+ephemerides plus ionosphere and time-system corrections), plus the long
+filenames the files are named by.
 
 The package is receiver-agnostic: it consumes plain record types and knows
 nothing about how the measurements were made. It follows the design of
@@ -140,6 +141,70 @@ not modelled yet can be written by implementing the ephemeris interface -
 `RINEXParser.system`, `RINEXParser.dedupe_key`, `RINEXParser.orbit_lines`
 and optionally `RINEXParser.clock_coefficients`, see
 `?write_ephemeris!`.
+
+## File names
+
+RINEX 3.02 and later name files by the long filename convention (RINEX 3.05
+appendix A1, unchanged in RINEX 4.02), and `rinex_filename` builds one from
+the header of the file, so a receiver does not have to assemble a name of
+its own:
+
+```julia
+path = joinpath(directory, rinex_filename(obs_header, start_time; period = Day(1)))
+# "/data/ROOF00DEU_R_20200010000_01D_01S_GO.rnx"
+
+RinexObsWriter(path, obs_header) do writer
+    write_epoch!(writer, epoch)
+end
+```
+
+The header determines the site (from its marker name, which RINEX 3 expects
+to be the nine-character site identification `XXXXMRCCC`), the data type
+(`GO` for a GPS observation file, `MN` for a mixed navigation file) and the
+data frequency (from its `interval`, which a navigation file name does not
+carry). The fields it does not determine are keywords: `period`,
+`data_source`, `compression`, or any site field a marker name does not
+provide. `system` and `kind` are not among them - the data type follows the
+file, so a header names its own, and passing one is an error rather than a
+keyword the header quietly overrules.
+
+```julia
+rinex_filename(obs_header)                       # start time from time_of_first_obs
+rinex_filename(obs_header, t; country = "DEU")   # marker name gives only the station
+rinex_filename(nav_header, t; marker_name = obs_header.marker_name, period = Day(1))
+```
+
+`RinexFileName` is the name itself, with a field per element of the
+convention, and `parse(RinexFileName, name)` reads one back - `tryparse`
+answers `nothing` instead of throwing, which selects the names of a directory
+that conform to the convention:
+
+```julia
+name = parse(RinexFileName, "ALGO00CAN_R_20121601000_01D_30S_MO.crx.gz")
+name.start_time  # 2012-06-08T10:00:00
+name.interval    # 30.0 seconds, from the 30S data-frequency field
+name.period      # Day(1), from 01D
+name.system      # 'M', mixed
+```
+
+Every field is fixed width, so a value that would not fit it - a station
+that is not four characters, a file period of 100 days, a sampling interval
+of 100 seconds - is rejected when the name is built rather than written out
+misaligned; a name that exists is one that renders. `nothing` is available for
+the two fields that have an "unspecified" encoding: `period` and `interval`
+are then written as `00U` - the zero count of those fields belongs to that
+`U`, so a period of no length is rejected rather than written as one of zero
+days.
+
+A name is not a path, though. Every field is kept as the field itself holds
+it: the start time floored to the minute, the period and the interval in the
+one unit and count they are written in - `Day(1) + Hour(12)` as the `Hour(36)`
+of its `36H`, a `24H` read from a name as `01D`. So rendering a name that was
+read is not always the name on disk - keep the path if you need to open the
+file. Reading is as strict as the spec, too, which is
+stricter than an archive: RINEX 2 short names (`algo1600.12o`) are a different
+convention and are not read, nor is a one-character compression field (`.Z`)
+or a navigation name carrying a data-frequency field it should not have.
 
 ## Epoch timing conventions
 
