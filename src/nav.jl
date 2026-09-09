@@ -244,6 +244,73 @@ orbit_lines(eph::GalileoEphemeris) = (
     (eph.transmission_time,),
 )
 
+"""
+    BeiDouEphemeris(; kwargs...)
+
+One BeiDou D1/D2 broadcast ephemeris in the units RINEX expects (angles in
+radians, `sqrt_a` in `√m`, times in seconds of BDT week). Field names follow
+the RINEX 3.05 BDS navigation record (Table A17).
+
+`aode` and `aodc` are the age of the ephemeris and of the clock data, and
+`sath1` is the autonomous satellite health flag (0 healthy). `tgd1_b1_b3`
+and `tgd2_b2_b3` are the two broadcast group delays in seconds.
+
+Unlike Galileo, whose `week` RINEX aligns with the GPS week, `toc`, `toe`,
+`week` and `transmission_time` of a BDS record are in BeiDou time: `week` is
+the continuous BDT week counted from the BDT epoch (2006-01-01), which is
+the GPS week minus 1356, and the seconds of week are BDT seconds, 14 s
+behind GPS time.
+"""
+Base.@kwdef struct BeiDouEphemeris
+    prn::Int
+    toc::DateTime
+    af0::Float64
+    af1::Float64
+    af2::Float64
+    aode::Float64
+    crs::Float64
+    deltan::Float64
+    m0::Float64
+    cuc::Float64
+    e::Float64
+    cus::Float64
+    sqrt_a::Float64
+    toe::Float64
+    cic::Float64
+    omega0::Float64
+    cis::Float64
+    i0::Float64
+    crc::Float64
+    omega::Float64
+    omegadot::Float64
+    idot::Float64
+    week::Float64
+    sv_accuracy::Float64
+    sath1::Float64
+    tgd1_b1_b3::Float64
+    tgd2_b2_b3::Float64
+    transmission_time::Float64
+    aodc::Float64
+end
+
+system(::BeiDouEphemeris) = 'C'
+# `aode` counts the hours the parameter set has been in use, so it grows
+# while the ephemeris stays the same and cannot identify the record; the
+# reference times do, as BeiDou issues a new `toe` with every new set.
+dedupe_key(eph::BeiDouEphemeris) = (system(eph), eph.prn, eph.toc, eph.toe)
+# Broadcast orbit line 5 holds a spare between IDOT and the week, which the
+# record writes as a zero field; the spares trailing the week and the age of
+# the clock data end their line and are left off, as Galileo's is.
+orbit_lines(eph::BeiDouEphemeris) = (
+    (eph.aode, eph.crs, eph.deltan, eph.m0),
+    (eph.cuc, eph.e, eph.cus, eph.sqrt_a),
+    (eph.toe, eph.cic, eph.omega0, eph.cis),
+    (eph.i0, eph.crc, eph.omega, eph.omegadot),
+    (eph.idot, 0.0, eph.week),
+    (eph.sv_accuracy, eph.sath1, eph.tgd1_b1_b3, eph.tgd2_b2_b3),
+    (eph.transmission_time, eph.aodc),
+)
+
 # The clock polynomial occupies the same three fields in every navigation
 # record, so an ephemeris type gets it for free.
 clock_coefficients(eph) = (eph.af0, eph.af1, eph.af2)
@@ -256,7 +323,9 @@ an `IO`. The header is written lazily on the first
 [`write_ephemeris!`](@ref). Ephemerides repeating a record that was
 already written - same satellite, issue of data, time of ephemeris, and
 for Galileo the navigation message source - are skipped, so it is safe to
-forward every decoded subframe. Close the writer (or use the do-block
+forward every decoded subframe. A BeiDou record is identified by its
+reference times instead of its issue of data, whose age counter grows
+while the ephemeris stays the same. Close the writer (or use the do-block
 form) to flush the file.
 """
 mutable struct RinexNavWriter{T<:IO}
@@ -385,11 +454,12 @@ end
 """
     write_ephemeris!(writer::RinexNavWriter, eph) -> Bool
 
-Append one ephemeris record ([`GPSEphemeris`](@ref) or
-[`GalileoEphemeris`](@ref)), writing the file header first if necessary.
-Returns whether the record was written (`false` for an ephemeris that was
-already written before). Throws an `ArgumentError` if the header pins the
-file to a single constellation and `eph` belongs to another one.
+Append one ephemeris record ([`GPSEphemeris`](@ref),
+[`GalileoEphemeris`](@ref) or [`BeiDouEphemeris`](@ref)), writing the file
+header first if necessary. Returns whether the record was written (`false`
+for an ephemeris that was already written before). Throws an
+`ArgumentError` if the header pins the file to a single constellation and
+`eph` belongs to another one.
 
 `eph` may be of any type implementing the ephemeris interface, so a
 constellation this package does not know yet can be written by defining
