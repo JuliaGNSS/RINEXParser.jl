@@ -576,14 +576,68 @@ end
         bds_eph.omega,
         bds_eph.omegadot,
     ]
-    # Line 5 carries IDOT, the spare, and the BDT week; the spare trailing
+    # Line 5 carries IDOT, the spare and the BDT week. The spare is left
+    # blank (section 6.4), so the week keeps its columns; the spare trailing
     # the week ends the line and is left off.
-    @test strip(body[6]) == "-3.239297798064E-10 0.000000000000E+00 7.300000000000E+02"
+    @test body[6] == "    -3.239297798064E-10" * " "^19 * " 7.300000000000E+02"
     @test orbit_values(body, 7:7) ≈
           [bds_eph.sv_accuracy, bds_eph.sath1, bds_eph.tgd1_b1_b3, bds_eph.tgd2_b2_b3]
     # Line 7 is the transmission time and the age of the clock data.
     @test strip(body[8]) == "2.664650000000E+05 1.000000000000E+00"
     @test body[9][1:3] == "C21"
+end
+
+@testset "the BeiDou record of the RINEX 3.05 example" begin
+    # The C01 record of Table A15, written back field by field. The example
+    # is the spec's own, so it pins the column layout of the record - the
+    # blank spare of broadcast orbit line 5 included - against the format
+    # rather than against this implementation.
+    eph = BeiDouEphemeris(;
+        prn = 1,
+        toc = DateTime(2014, 5, 10, 0, 0, 0),
+        af0 = 2.969256602228e-4,
+        af1 = 2.196998138970e-11,
+        af2 = 0.0,
+        aode = 1.0,
+        crs = 4.365468750000e2,
+        deltan = 1.318269196918e-9,
+        m0 = -3.118148933476,
+        cuc = 1.447647809982e-5,
+        e = 2.822051756084e-4,
+        cus = 8.092261850834e-6,
+        sqrt_a = 6.493480609894e3,
+        toe = 5.184e5,
+        cic = -2.654269337654e-8,
+        omega0 = 3.076630958509,
+        cis = -3.864988684654e-8,
+        i0 = 1.103024081152e-1,
+        crc = -2.506406250000e2,
+        omega = 2.587808789012,
+        omegadot = -3.039412318009e-10,
+        idot = 2.389385241772e-10,
+        week = 435.0,
+        sv_accuracy = 2.0,
+        sath1 = 0.0,
+        tgd1_b1_b3 = 1.42e-8,
+        tgd2_b2_b3 = -1.04e-8,
+        transmission_time = 5.184e5,
+        aodc = 0.0,
+    )
+    lines = written_lines(RinexNavWriter, RinexNavHeader(satellite_system = 'C')) do writer
+        write_ephemeris!(writer, eph)
+    end
+    # The spec prints the example with a lowercase exponent, which RINEX
+    # allows next to the "E" and "D" of the Fortran formats.
+    @test body_lines(lines) == [
+        "C01 2014 05 10 00 00 00 2.969256602228E-04 2.196998138970E-11 0.000000000000E+00",
+        "     1.000000000000E+00 4.365468750000E+02 1.318269196918E-09-3.118148933476E+00",
+        "     1.447647809982E-05 2.822051756084E-04 8.092261850834E-06 6.493480609894E+03",
+        "     5.184000000000E+05-2.654269337654E-08 3.076630958509E+00-3.864988684654E-08",
+        "     1.103024081152E-01-2.506406250000E+02 2.587808789012E+00-3.039412318009E-10",
+        "     2.389385241772E-10                    4.350000000000E+02",
+        "     2.000000000000E+00 0.000000000000E+00 1.420000000000E-08-1.040000000000E-08",
+        "     5.184000000000E+05 0.000000000000E+00",
+    ]
 end
 
 @testset "single-system header rejects other constellations" begin
@@ -613,7 +667,7 @@ end
     rm(path, force = true)
 end
 
-@testset "Table A15 bit fields" begin
+@testset "Table A8 bit fields" begin
     # The two records of a Galileo receiver: I/NAV from E1-B with the
     # E5b/E1 clock parameters, F/NAV from E5a-I with the E5a/E1 ones.
     @test galileo_data_sources(; inav_e1b = true, clock_e5b_e1 = true) == 513.0

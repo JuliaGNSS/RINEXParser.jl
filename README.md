@@ -108,7 +108,7 @@ end
 ```
 
 Galileo I/NAV and F/NAV ephemerides are written with `GalileoEphemeris`
-(RINEX Table A15: `iodnav`, `data_sources`, `sisa`, `bgd_e5a_e1`,
+(RINEX Table A8: `iodnav`, `data_sources`, `sisa`, `bgd_e5a_e1`,
 `bgd_e5b_e1`, ...); the Klobuchar-style NeQuick coefficients go into an
 `IonosphericCorrection("GAL", (ai0, ai1, ai2, 0.0))` header record. The two
 bit fields of that record are assembled by `galileo_data_sources` and
@@ -120,7 +120,7 @@ sv_health = galileo_sv_health(; e1b_dvs = 1, e1b_hs = 1)                     # 3
 ```
 
 BeiDou D1/D2 ephemerides are written with `BeiDouEphemeris` (RINEX Table
-A17: `aode`, `aodc`, `sath1`, `tgd1_b1_b3`, `tgd2_b2_b3`, ...). Its `toc`,
+A14: `aode`, `aodc`, `sath1`, `tgd1_b1_b3`, `tgd2_b2_b3`, ...). Its `toc`,
 `toe`, `week` and `transmission_time` are in BeiDou time - `week` is the
 continuous BDT week, the GPS week minus 1356 - and the Klobuchar
 coefficients go into `IonosphericCorrection("BDSA", ...)` and

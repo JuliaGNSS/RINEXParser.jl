@@ -51,7 +51,7 @@ end
 One GPS LNAV broadcast ephemeris in the units RINEX expects (semicircle
 angles already converted to radians, `sqrt_a` in `√m`, times in seconds of
 GPS week). Field names follow the RINEX 3.05 GPS navigation record
-(Table A14).
+(Table A6).
 """
 Base.@kwdef struct GPSEphemeris
     prn::Int
@@ -104,10 +104,10 @@ orbit_lines(eph::GPSEphemeris) = (
 
 One Galileo I/NAV or F/NAV broadcast ephemeris in the units RINEX expects
 (angles in radians, `sqrt_a` in `√m`, times in seconds of Galileo week).
-Field names follow the RINEX 3.05 Galileo navigation record (Table A15).
+Field names follow the RINEX 3.05 Galileo navigation record (Table A8).
 
 `data_sources` encodes the navigation message source and clock reference
-(bit field, Table A15) and `sv_health` packs the per-signal validity and
+(bit field, Table A8) and `sv_health` packs the per-signal validity and
 health bits; both are assembled by
 [`galileo_data_sources`](@ref) and [`galileo_sv_health`](@ref). The default
 `data_sources = 513` is an I/NAV message from E1-B with E5b/E1 clock
@@ -155,7 +155,7 @@ end
                            clock_e5a_e1 = false, clock_e5b_e1 = false) -> Float64
 
 The `data_sources` bit field of a [`GalileoEphemeris`](@ref) (RINEX 3.05
-Table A15), assembled from the navigation messages the record was decoded
+Table A8), assembled from the navigation messages the record was decoded
 from and the signal pair its clock parameters, `toc` and `sisa` refer to.
 
 At least one message source is required, and exactly one clock reference:
@@ -202,7 +202,7 @@ end
                         e5b_dvs = 0, e5b_hs = 0) -> Float64
 
 The `sv_health` bit field of a [`GalileoEphemeris`](@ref) (RINEX 3.05 Table
-A15), packed from the data validity status (`dvs`, 0 or 1) and health
+A8), packed from the data validity status (`dvs`, 0 or 1) and health
 status (`hs`, 0-3) of each signal as they are broadcast in the navigation
 message. `galileo_sv_health()` is a satellite healthy on every signal.
 """
@@ -249,7 +249,7 @@ orbit_lines(eph::GalileoEphemeris) = (
 
 One BeiDou D1/D2 broadcast ephemeris in the units RINEX expects (angles in
 radians, `sqrt_a` in `√m`, times in seconds of BDT week). Field names follow
-the RINEX 3.05 BDS navigation record (Table A17).
+the RINEX 3.05 BDS navigation record (Table A14).
 
 `aode` and `aodc` are the age of the ephemeris and of the clock data, and
 `sath1` is the autonomous satellite health flag (0 healthy). `tgd1_b1_b3`
@@ -257,9 +257,13 @@ and `tgd2_b2_b3` are the two broadcast group delays in seconds.
 
 Unlike Galileo, whose `week` RINEX aligns with the GPS week, `toc`, `toe`,
 `week` and `transmission_time` of a BDS record are in BeiDou time: `week` is
-the continuous BDT week counted from the BDT epoch (2006-01-01), which is
-the GPS week minus 1356, and the seconds of week are BDT seconds, 14 s
-behind GPS time.
+the continuous BDT week counted from the BDT epoch (2006-01-01) - the
+broadcast 13-bit week plus 8192 per roll-over - and the seconds of week are
+BDT seconds, 14 s behind GPS time.
+
+`transmission_time` refers to `week`, so a message received after the week
+of the ephemeris rolled over is adjusted by ±604800 s; a transmission time
+that is not known is written as `0.999999999999e9`, as the spec asks.
 """
 Base.@kwdef struct BeiDouEphemeris
     prn::Int
@@ -298,15 +302,16 @@ system(::BeiDouEphemeris) = 'C'
 # while the ephemeris stays the same and cannot identify the record; the
 # reference times do, as BeiDou issues a new `toe` with every new set.
 dedupe_key(eph::BeiDouEphemeris) = (system(eph), eph.prn, eph.toc, eph.toe)
-# Broadcast orbit line 5 holds a spare between IDOT and the week, which the
-# record writes as a zero field; the spares trailing the week and the age of
-# the clock data end their line and are left off, as Galileo's is.
+# Broadcast orbit line 5 holds a spare between IDOT and the week, written
+# blank as section 6.4 asks and the example of Table A15 shows; the spares
+# trailing the week and the age of the clock data end their line and are
+# left off, as Galileo's is.
 orbit_lines(eph::BeiDouEphemeris) = (
     (eph.aode, eph.crs, eph.deltan, eph.m0),
     (eph.cuc, eph.e, eph.cus, eph.sqrt_a),
     (eph.toe, eph.cic, eph.omega0, eph.cis),
     (eph.i0, eph.crc, eph.omega, eph.omegadot),
-    (eph.idot, 0.0, eph.week),
+    (eph.idot, nothing, eph.week),
     (eph.sv_accuracy, eph.sath1, eph.tgd1_b1_b3, eph.tgd2_b2_b3),
     (eph.transmission_time, eph.aodc),
 )
@@ -414,6 +419,14 @@ function add_orbit_values!(
     values,
 )
     for (i, value) in enumerate(values)
+        # A spare the record has to keep a place for, because a value of the
+        # line follows it. Section 6.4 asks for spares to be left blank, so
+        # that a future version assigning them a meaning cannot be read out
+        # of a zero that was never broadcast.
+        if isnothing(value)
+            add_blanks!(record, 19)
+            continue
+        end
         fits_scientific_field(value, 12, 19) ||
             ephemeris_field_error(system, prn, line_number, i, value)
         add_field!(record, FMT_E19_12, value)
