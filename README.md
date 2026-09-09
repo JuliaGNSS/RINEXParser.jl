@@ -13,10 +13,10 @@ epochs stream as they happen, ephemerides are written event-driven and
 deduplicated). Output has been cross-validated against RTKLIB's RINEX
 reader.
 
-GPS and Galileo are implemented (matching the constellations supported by
-GNSSSignals.jl); the record types carry the satellite-system character
-throughout, so further constellations can be added without breaking the
-API.
+GPS, Galileo and BeiDou are implemented (matching the constellations
+supported by GNSSSignals.jl); the record types carry the satellite-system
+character throughout, so further constellations can be added without
+breaking the API.
 
 ## Observation files
 
@@ -119,6 +119,13 @@ data_sources = galileo_data_sources(; inav_e1b = true, clock_e5b_e1 = true)  # 5
 sv_health = galileo_sv_health(; e1b_dvs = 1, e1b_hs = 1)                     # 3
 ```
 
+BeiDou D1/D2 ephemerides are written with `BeiDouEphemeris` (RINEX Table
+A17: `aode`, `aodc`, `sath1`, `tgd1_b1_b3`, `tgd2_b2_b3`, ...). Its `toc`,
+`toe`, `week` and `transmission_time` are in BeiDou time - `week` is the
+continuous BDT week, the GPS week minus 1356 - and the Klobuchar
+coefficients go into `IonosphericCorrection("BDSA", ...)` and
+`IonosphericCorrection("BDSB", ...)` header records.
+
 A navigation file containing several constellations is marked `M: MIXED`
 automatically; set `satellite_system = 'G'` in `RinexNavHeader` for a
 single-system file, which then rejects ephemerides of other
@@ -126,8 +133,10 @@ constellations.
 
 `write_ephemeris!` skips ephemerides it has already written (same
 satellite, issue-of-data, time of ephemeris, and for Galileo the
-navigation message source, since I/NAV and F/NAV are separate records), so
-it is safe to forward every decoded navigation frame. The nav header is
+navigation message source, since I/NAV and F/NAV are separate records; a
+BeiDou record is identified by its reference times instead, since its age
+of data grows while the ephemeris stays the same), so it is safe to forward
+every decoded navigation frame. The nav header is
 also written lazily, and `writer.header` may be updated until the first
 ephemeris is written, which is useful when ionosphere/UTC parameters
 decode later than the first ephemeris.

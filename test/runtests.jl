@@ -87,6 +87,38 @@ gal_eph = GalileoEphemeris(;
     transmission_time = 266465.0,
 )
 
+bds_eph = BeiDouEphemeris(;
+    prn = 21,
+    toc = DateTime(2020, 1, 1, 2, 0, 0),
+    af0 = -2.229036763310e-4,
+    af1 = 1.396483990392e-11,
+    af2 = 0.0,
+    aode = 1.0,
+    crs = -3.128125000000e2,
+    deltan = 1.281847459404e-9,
+    m0 = -1.573072741952,
+    cuc = -1.019053161144e-5,
+    e = 6.324013043195e-4,
+    cus = 6.938725709915e-6,
+    sqrt_a = 6.493413494110e3,
+    toe = 266400.0,
+    cic = 1.769512891769e-7,
+    omega0 = -2.204464371371,
+    cis = -1.303851604462e-7,
+    i0 = 9.626440735042e-1,
+    crc = 1.755781250000e2,
+    omega = -2.936387939148,
+    omegadot = -2.157608862158e-9,
+    idot = -3.239297798064e-10,
+    week = 730.0,
+    sv_accuracy = 2.0,
+    sath1 = 0.0,
+    tgd1_b1_b3 = -1.100000000000e-8,
+    tgd2_b2_b3 = -1.170000000000e-8,
+    transmission_time = 266465.0,
+    aodc = 1.0,
+)
+
 # Stand-in for a constellation this package does not model yet: writing it
 # must need no more than the ephemeris interface.
 struct MinimalEphemeris
@@ -97,7 +129,7 @@ struct MinimalEphemeris
     af2::Float64
     toe::Float64
 end
-RINEXParser.system(::MinimalEphemeris) = 'C'
+RINEXParser.system(::MinimalEphemeris) = 'J'
 RINEXParser.dedupe_key(eph::MinimalEphemeris) = (RINEXParser.system(eph), eph.prn, eph.toe)
 RINEXParser.orbit_lines(eph::MinimalEphemeris) = ((eph.toe,),)
 
@@ -508,6 +540,52 @@ end
     @test strip(body[14]) == "2.575107271162E-10 2.580000000000E+02 2.086000000000E+03"
 end
 
+@testset "BeiDou navigation file" begin
+    lines = written_lines(RinexNavWriter, RinexNavHeader(satellite_system = 'C')) do writer
+        @test write_ephemeris!(writer, bds_eph)
+        # The age of the ephemeris grows while the parameter set stays the
+        # same, so it must not make the record a new one.
+        @test !write_ephemeris!(writer, modify(bds_eph; aode = 2.0, aodc = 2.0))
+        # A new parameter set comes with a new Toe.
+        @test write_ephemeris!(writer, modify(bds_eph; toe = 269400.0))
+    end
+
+    @test content(lines[1]) == "     3.05           N: GNSS NAV DATA    C: BDS"
+
+    body = body_lines(lines)
+    @test length(body) == 16
+    @test body[1][1:23] == "C21 2020 01 01 02 00 00"
+    clock = parse.(Float64, [body[1][c:(c+18)] for c in (24, 43, 62)])
+    @test clock ≈ [bds_eph.af0, bds_eph.af1, bds_eph.af2]
+    # Round-trip the Keplerian elements of broadcast orbit lines 1-4.
+    @test orbit_values(body, 2:5) ≈ [
+        bds_eph.aode,
+        bds_eph.crs,
+        bds_eph.deltan,
+        bds_eph.m0,
+        bds_eph.cuc,
+        bds_eph.e,
+        bds_eph.cus,
+        bds_eph.sqrt_a,
+        bds_eph.toe,
+        bds_eph.cic,
+        bds_eph.omega0,
+        bds_eph.cis,
+        bds_eph.i0,
+        bds_eph.crc,
+        bds_eph.omega,
+        bds_eph.omegadot,
+    ]
+    # Line 5 carries IDOT, the spare, and the BDT week; the spare trailing
+    # the week ends the line and is left off.
+    @test strip(body[6]) == "-3.239297798064E-10 0.000000000000E+00 7.300000000000E+02"
+    @test orbit_values(body, 7:7) ≈
+          [bds_eph.sv_accuracy, bds_eph.sath1, bds_eph.tgd1_b1_b3, bds_eph.tgd2_b2_b3]
+    # Line 7 is the transmission time and the age of the clock data.
+    @test strip(body[8]) == "2.664650000000E+05 1.000000000000E+00"
+    @test body[9][1:3] == "C21"
+end
+
 @testset "single-system header rejects other constellations" begin
     writer = RinexNavWriter(IOBuffer(), RinexNavHeader(satellite_system = 'G'))
     @test_throws ArgumentError write_ephemeris!(writer, gal_eph)
@@ -606,18 +684,18 @@ end
 end
 
 @testset "an unknown constellation only needs the ephemeris interface" begin
-    bds = MinimalEphemeris(21, DateTime(2020, 1, 1, 2, 0, 0), 1.0e-4, 0.0, 0.0, 266400.0)
-    lines = written_lines(RinexNavWriter, RinexNavHeader(satellite_system = 'C')) do writer
-        @test write_ephemeris!(writer, bds)
-        @test !write_ephemeris!(writer, bds)
+    qzss = MinimalEphemeris(3, DateTime(2020, 1, 1, 2, 0, 0), 1.0e-4, 0.0, 0.0, 266400.0)
+    lines = written_lines(RinexNavWriter, RinexNavHeader(satellite_system = 'J')) do writer
+        @test write_ephemeris!(writer, qzss)
+        @test !write_ephemeris!(writer, qzss)
     end
-    @test content(lines[1]) == "     3.05           N: GNSS NAV DATA    C: BDS"
+    @test content(lines[1]) == "     3.05           N: GNSS NAV DATA    J: QZSS"
     body = body_lines(lines)
     @test length(body) == 2
-    @test body[1][1:23] == "C21 2020 01 01 02 00 00"
+    @test body[1][1:23] == "J03 2020 01 01 02 00 00"
     # Clock coefficients default to the af0/af1/af2 fields.
     clock = parse.(Float64, [body[1][c:(c+18)] for c in (24, 43, 62)])
-    @test clock ≈ [bds.af0, bds.af1, bds.af2]
+    @test clock ≈ [qzss.af0, qzss.af1, qzss.af2]
     @test strip(body[2]) == "2.664000000000E+05"
 end
 
