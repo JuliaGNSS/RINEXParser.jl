@@ -1,5 +1,17 @@
 # Changelog
 
+# [1.1.0](https://github.com/JuliaGNSS/RINEXParser.jl/compare/v1.0.0...v1.1.0) (2026-09-10)
+
+
+### Bug Fixes
+
+* follow the RINEX 3.05 spec for spare fields and table numbers ([729b637](https://github.com/JuliaGNSS/RINEXParser.jl/commit/729b637e193c77c47f5c74dc7ad3c263852663c5))
+
+
+### Features
+
+* add BeiDou ephemeris support ([bc9392a](https://github.com/JuliaGNSS/RINEXParser.jl/commit/bc9392aafd65bac9b348d074a3383cf78f2f6a69))
+
 # [1.0.0](https://github.com/JuliaGNSS/RINEXParser.jl/compare/v0.4.0...v1.0.0) (2026-08-04)
 
 Same as v0.4.0. No breaking changes.
