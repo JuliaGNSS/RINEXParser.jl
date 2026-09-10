@@ -1,5 +1,24 @@
 # Changelog
 
+# [2.0.0](https://github.com/JuliaGNSS/RINEXParser.jl/compare/v1.1.0...v2.0.0) (2026-09-10)
+
+
+* feat!: act on the RINEX 3.05 conformance review ([9e24bc8](https://github.com/JuliaGNSS/RINEXParser.jl/commit/9e24bc8dd3bf1444eee11869f8e8c17516dfb180))
+
+
+### BREAKING CHANGES
+
+* `header.leap_seconds` reads back as a `LeapSeconds` rather
+than as the `Int` or `NTuple{4,Int}` it was assigned; both still convert on
+assignment, so headers are written the same way. Input the format cannot
+represent is now rejected where it used to be written: an epoch flag of
+2-6, a loss-of-lock indicator of 8 or 9, a navigation value needing a
+three-digit exponent, a header field wider than its columns, all three
+Galileo message sources at once, and an observation file name that leaves
+out its data-frequency field.
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+
 # [1.1.0](https://github.com/JuliaGNSS/RINEXParser.jl/compare/v1.0.0...v1.1.0) (2026-09-10)
 
 
