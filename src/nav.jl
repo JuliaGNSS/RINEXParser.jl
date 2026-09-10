@@ -261,9 +261,10 @@ the continuous BDT week counted from the BDT epoch (2006-01-01) - the
 broadcast 13-bit week plus 8192 per roll-over - and the seconds of week are
 BDT seconds, 14 s behind GPS time.
 
-`transmission_time` refers to `week`, so a message received after the week
-of the ephemeris rolled over is adjusted by ±604800 s; a transmission time
-that is not known is written as `0.999999999999e9`, as the spec asks.
+`transmission_time` is written as it is given and has to refer to `week`,
+so a message received after the week of the ephemeris rolled over is passed
+in adjusted by ±604800 s. The spec's encoding of a transmission time that is
+not known is `0.999999999999e9`.
 """
 Base.@kwdef struct BeiDouEphemeris
     prn::Int
@@ -481,7 +482,11 @@ constellation this package does not know yet can be written by defining
   - `RINEXParser.dedupe_key(eph)`: a tuple identifying the record, see
     [`RinexNavWriter`](@ref),
   - `RINEXParser.orbit_lines(eph)`: one tuple of at most four values per
-    broadcast orbit line, in record order,
+    broadcast orbit line, in record order. A `nothing` in place of a value
+    writes a blank field, which is what a spare a value of the line follows
+    is written as; every other field is expected to hold a number, so a
+    `nothing` an accessor produces by accident blanks it rather than being
+    rejected,
   - `RINEXParser.clock_coefficients(eph)`: the three clock polynomial
     coefficients, which default to the `af0`, `af1` and `af2` fields,
 
