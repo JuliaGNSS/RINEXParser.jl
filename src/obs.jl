@@ -1,4 +1,83 @@
 """
+    PhaseShift(system, code, correction; satellites = Int[])
+
+One `SYS / PHASE SHIFT` header record: the correction in cycles that was
+applied to the carrier phase `code` of `system` to align it with the
+reference signal of its band (RINEX 3.05 Table A23). `satellites` names the
+satellite numbers the correction applies to; an empty list means every
+satellite of the system, which is the usual case.
+
+RINEX 3.05 section 5.2.12 gives the record three distinct readings, and the
+one a file makes is a statement about its data:
+
+  - a **correction** (`-0.25`) says the phase was not aligned as it came out
+    of the receiver and this is what was added to align it,
+  - **zero** says the phase arrived aligned - from the receiver or from a
+    stream such as RTCM-MSM - and nothing was applied,
+  - a **blank** correction says the code is the reference signal of its band
+    and needs none. This is what a code no `PhaseShift` names is written as.
+
+The default is therefore a claim that every carrier phase in the file is a
+reference signal. A file carrying a non-reference code (GPS `L2S`, Galileo
+`L8Q`, ...) has to say which of the first two applies to it, or a reader
+cannot reconstruct what the receiver measured.
+"""
+const MAX_PHASE_SHIFT_SATELLITES = 99
+
+"""
+    check_phase_shift_satellites(system, code, satellites) -> satellites
+
+Return the satellite list of a [`PhaseShift`](@ref), or throw an
+`ArgumentError` if the record cannot hold it. The list is a `Vector`, so it
+stays open to `push!` after the shift was constructed; the header writer
+therefore checks it again, and this is what both of them call.
+"""
+function check_phase_shift_satellites(system::Char, code, satellites)
+    foreach(prn -> check_satellite_number(system, prn), satellites)
+    # The list is counted into an `I2.2` field, and the count is what tells
+    # a reader how many of the identifications that follow to read.
+    length(satellites) <= MAX_PHASE_SHIFT_SATELLITES || throw(
+        ArgumentError(
+            "The phase shift of $system $code names $(length(satellites)) " *
+            "satellites, but the record counts them in two columns, which holds " *
+            "$MAX_PHASE_SHIFT_SATELLITES; leave the list empty to name every " *
+            "satellite of the system",
+        ),
+    )
+    satellites
+end
+
+struct PhaseShift
+    system::Char
+    code::String
+    correction::Float64
+    satellites::Vector{Int}
+    function PhaseShift(system, code, correction, satellites)
+        check_satellite_system(system)
+        startswith(code, "L") || throw(
+            ArgumentError(
+                "A phase shift corrects a carrier phase, so \"$code\" is not a code " *
+                "it can be given for; carrier phase codes start with \"L\"",
+            ),
+        )
+        # Converted before it is measured against its columns, so that the
+        # `Real` the constructor takes reaches the check as the `Float64` it
+        # is written as.
+        correction = Float64(correction)
+        fits_fixed_field(correction, 5, 8) ||
+            fixed_field_error("Phase shift of $system $code", correction, 5, 8)
+        new(
+            system,
+            String(code),
+            correction,
+            check_phase_shift_satellites(system, code, collect(Int, satellites)),
+        )
+    end
+end
+PhaseShift(system::Char, code::AbstractString, correction::Real; satellites = Int[]) =
+    PhaseShift(system, code, correction, satellites)
+
+"""
     RinexObsHeader(; obs_types, kwargs...)
 
 Header of a RINEX 3.05 observation file.
@@ -10,8 +89,14 @@ to keep the system order deterministic:
 
     obs_types = ['G' => ["C1C", "L1C", "D1C", "S1C"]]
 
+`phase_shifts` carries the [`PhaseShift`](@ref) records of the carrier
+phases that were corrected to align them with the reference signal of their
+band; a phase code no entry names is written as a reference signal that
+needed none.
+
 `time_of_first_obs` may be left as `nothing`; it is then taken from the
-first epoch passed to [`write_epoch!`](@ref).
+first epoch passed to [`write_epoch!`](@ref) and assigned to the header, so
+that [`rinex_filename`](@ref) can name the file from the header afterwards.
 
 The header is mutable, and the writer only reads it when it writes the
 header out on the first epoch, so fields that the data provides late - a
@@ -36,9 +121,10 @@ Base.@kwdef mutable struct RinexObsHeader
     approx_position::Union{Nothing,NTuple{3,Float64}} = nothing
     antenna_delta_hen::NTuple{3,Float64} = (0.0, 0.0, 0.0)
     obs_types::Vector{Pair{Char,Vector{String}}}
+    phase_shifts::Vector{PhaseShift} = PhaseShift[]
     interval::Union{Nothing,Float64} = nothing
     time_of_first_obs::Union{Nothing,DateTime} = nothing
-    leap_seconds::Union{Nothing,Int,NTuple{4,Int}} = nothing
+    leap_seconds::Union{Nothing,LeapSeconds} = nothing
 end
 
 """
@@ -49,10 +135,10 @@ indicator `lli` and signal-strength indicator `ssi`. Units follow RINEX
 conventions: pseudorange in meters, carrier phase in whole cycles, Doppler
 in Hz, signal strength in dB-Hz.
 
-RINEX documents the loss-of-lock indicator as a bit field of 0-7 and the
-signal strength as 1-9, but both are written as a single digit, so any of
-0-9 is accepted - `ssi = 0` is what a receiver reports for a projected
-signal strength it does not have yet.
+The loss-of-lock indicator is a bit field of three bits, so it holds 0-7
+(section 6.7.1). The signal strength is documented as 1-9, and `ssi = 0` is
+accepted next to those: it is what a receiver reports for a projected signal
+strength it does not have yet.
 
 A non-finite `value` is written as a blank field, which is how RINEX
 records that an observation type carries no measurement for a satellite.
@@ -62,20 +148,19 @@ struct ObsValue
     lli::Union{Nothing,Int}
     ssi::Union{Nothing,Int}
     function ObsValue(value, lli, ssi)
-        new(value, check_indicator(lli, "lli"), check_indicator(ssi, "ssi"))
+        new(value, check_indicator(lli, "lli", 7), check_indicator(ssi, "ssi", 9))
     end
 end
 ObsValue(value; lli = nothing, ssi = nothing) = ObsValue(value, lli, ssi)
 
-# Both indicators occupy a single column, so a value of more than one digit
-# would shift the rest of the record.
-check_indicator(::Nothing, name) = nothing
-check_indicator(indicator::Integer, name) =
-    0 <= indicator <= 9 ? Int(indicator) :
+# Both indicators occupy a single column, so neither can hold more than one
+# digit; the loss-of-lock indicator is narrower still, being three bits.
+check_indicator(::Nothing, name, largest) = nothing
+check_indicator(indicator::Integer, name, largest) =
+    0 <= indicator <= largest ? Int(indicator) :
     throw(
         ArgumentError(
-            "Observation indicator $name is $indicator, but it occupies a single " *
-            "column and holds 0-9",
+            "Observation indicator $name is $indicator, but it holds 0-$largest",
         ),
     )
 
@@ -168,6 +253,13 @@ One observation epoch. `time` is the epoch in the file's time system (GPS
 time for a GPS file); `fractional_second` carries sub-millisecond precision
 beyond `DateTime`. `clock_offset` is the optional receiver clock offset in
 seconds written at the end of the epoch record.
+
+`flag` is 0 for an ordinary epoch and 1 to mark a power failure between the
+previous epoch and this one. The remaining flags of RINEX 3.05 Table A3
+(2-5) introduce event records, whose epoch line counts header records rather
+than satellites and is followed by those instead of by observations; this
+writer does not produce them, so it rejects those flags rather than write
+observations under a record type that does not carry them.
 """
 struct ObsEpoch
     time::DateTime
@@ -175,6 +267,16 @@ struct ObsEpoch
     flag::Int
     clock_offset::Union{Nothing,Float64}
     satellites::Vector{SatObs}
+    function ObsEpoch(time, fractional_second, flag, clock_offset, satellites)
+        flag in (0, 1) || throw(
+            ArgumentError(
+                "The epoch flag is $flag, but this writer records observations, " *
+                "which is flag 0 or - for a power failure since the previous epoch " *
+                "- flag 1; the event records of flags 2-5 are not written",
+            ),
+        )
+        new(time, fractional_second, flag, clock_offset, satellites)
+    end
 end
 ObsEpoch(
     time::DateTime,
@@ -222,15 +324,59 @@ function RinexObsWriter(f::Function, target, header::RinexObsHeader)
     end
 end
 
-# Checked when the writer is created, so an unknown system character does
-# not surface from the lazy header write inside `close`.
-check_obs_header(header::RinexObsHeader) =
+# Checked when the writer is created, so a header the records cannot hold
+# does not surface from the lazy header write inside `close`.
+function check_obs_header(header::RinexObsHeader)
     foreach(check_satellite_system, first.(header.obs_types))
+    check_header_field(header.program, 20, "The program of the header")
+    check_header_field(header.run_by, 20, "The agency running the program")
+    check_header_field(header.marker_name, 60, "The marker name")
+    check_header_field(header.marker_type, 20, "The marker type")
+    check_header_field(header.observer, 20, "The observer")
+    check_header_field(header.agency, 40, "The agency")
+    check_header_field(header.receiver_number, 20, "The receiver number")
+    check_header_field(header.receiver_type, 20, "The receiver type")
+    check_header_field(header.receiver_version, 20, "The receiver version")
+    check_header_field(header.antenna_number, 20, "The antenna number")
+    check_header_field(header.antenna_type, 20, "The antenna type")
+    for (i, shift) in enumerate(header.phase_shifts)
+        check_phase_shift_satellites(shift.system, shift.code, shift.satellites)
+        codes = obs_types_for(header, shift.system)
+        shift.code in codes || throw(
+            ArgumentError(
+                "The phase shift of $(shift.system) $(shift.code) names an " *
+                "observation type the header does not declare for system " *
+                "'$(shift.system)'; it declares $(join(codes, ", "))",
+            ),
+        )
+        # One code may carry several records, one per group of satellites,
+        # but a satellite cannot be told two corrections for the same phase
+        # - and an empty list already claims all of them.
+        for other in view(header.phase_shifts, 1:(i-1))
+            (other.system == shift.system && other.code == shift.code) || continue
+            overlap =
+                isempty(shift.satellites) || isempty(other.satellites) ?
+                "every satellite of the system" :
+                let shared = intersect(shift.satellites, other.satellites)
+                    isempty(shared) ? "" :
+                    join(map(prn -> satellite_id(shift.system, prn), sort(shared)), ", ")
+                end
+            isempty(overlap) || throw(
+                ArgumentError(
+                    "Two phase shifts of $(shift.system) $(shift.code) apply to " *
+                    "$overlap, which would tell it two corrections for one " *
+                    "carrier phase",
+                ),
+            )
+        end
+    end
+    nothing
+end
 
 function Base.close(writer::RinexObsWriter)
     try
         # An empty file still gets its header, so it is valid RINEX.
-        writer.header_written || write_obs_header(writer, nothing)
+        writer.header_written || write_obs_header(writer, nothing, 0.0)
     finally
         writer.owns_io ? close(writer.io) : flush(writer.io)
     end
@@ -247,15 +393,20 @@ function obs_types_for(header::RinexObsHeader, system::Char)
     isnothing(index) && throw(
         ArgumentError(
             "The header declares no observation types for system '$system'; it " *
-            "carries the systems $(join(map(p -> "'$(first(p))'", header.obs_types), ", "))",
+            "carries the systems " *
+            join(map(p -> "'$(first(p))'", header.obs_types), ", "),
         ),
     )
     last(header.obs_types[index])
 end
 
-function write_obs_header(writer::RinexObsWriter, first_epoch_time)
+function write_obs_header(writer::RinexObsWriter, first_epoch_time, first_epoch_fraction)
     io = writer.io
     header = writer.header
+    # Checked again here, not only where the writer was created: the header
+    # is documented as assignable until this runs, so this is the first
+    # point at which what is written out is known.
+    check_obs_header(header)
     version_type_line(io, "OBSERVATION DATA", first.(header.obs_types))
     program_line(io, header.program, header.run_by)
     header_line(io, header.marker_name, "MARKER NAME")
@@ -284,24 +435,44 @@ function write_obs_header(writer::RinexObsWriter, first_epoch_time)
     if !isnothing(header.interval)
         header_line(io, Printf.format(FMT_F10_3, header.interval), "INTERVAL")
     end
-    time_of_first_obs = something(header.time_of_first_obs, first_epoch_time, missing)
-    if !ismissing(time_of_first_obs)
-        t = time_of_first_obs
+    # The epoch the record is taken from carries the sub-millisecond part of
+    # its seconds, which the header field is wide enough to hold; a time the
+    # header itself was given has none. Taking it from the data also fills
+    # the header field in, so that `rinex_filename` can name the file from
+    # the header once the first epoch has been written.
+    if isnothing(header.time_of_first_obs) && !isnothing(first_epoch_time)
+        header.time_of_first_obs = first_epoch_time
+        fraction = first_epoch_fraction
+    else
+        fraction = 0.0
+    end
+    if !isnothing(header.time_of_first_obs)
+        t = header.time_of_first_obs
         content =
             lpad(year(t), 6) *
             lpad(month(t), 6) *
             lpad(day(t), 6) *
             lpad(hour(t), 6) *
             lpad(minute(t), 6) *
-            Printf.format(FMT_F13_7, epoch_seconds(t, 0.0)) *
+            Printf.format(FMT_F13_7, epoch_seconds(t, fraction)) *
             " "^5 *
             time_system(first.(header.obs_types))
         header_line(io, content, "TIME OF FIRST OBS")
     end
-    # Zero phase shift for every carrier-phase observable (mandatory record).
+    # One record per carrier phase, which the format makes mandatory: the
+    # correction that aligned it, or a blank saying it is the reference
+    # signal of its band. See `PhaseShift` for what each of them claims.
     for (system, types) in header.obs_types, type in types
         startswith(type, "L") || continue
-        header_line(io, string(system, " ", type), "SYS / PHASE SHIFT")
+        stated = false
+        # A code may carry more than one record, because a correction need
+        # not apply to every satellite of the system.
+        for shift in header.phase_shifts
+            (shift.system == system && shift.code == type) || continue
+            phase_shift_lines(io, system, type, shift)
+            stated = true
+        end
+        stated || phase_shift_lines(io, system, type, nothing)
     end
     header_line(io, lpad(0, 3), "GLONASS SLOT / FRQ #")
     header_line(io, "", "GLONASS COD/PHS/BIS")
@@ -310,6 +481,33 @@ function write_obs_header(writer::RinexObsWriter, first_epoch_time)
     end
     header_line(io, "", "END OF HEADER")
     writer.header_written = true
+end
+
+# `A1,1X,A3,1X,F8.5,2X,I2.2` and then the satellite numbers as `10(1X,A3)`,
+# continued on further records - indented past the fields they repeat - when
+# more than ten of them are named.
+const PHASE_SHIFT_SATELLITES_PER_LINE = 10
+
+function phase_shift_lines(io::IO, system::Char, code::AbstractString, ::Nothing)
+    header_line(io, string(system, ' ', code), "SYS / PHASE SHIFT")
+end
+function phase_shift_lines(io::IO, system::Char, code::AbstractString, shift::PhaseShift)
+    lead =
+        string(system, ' ', code, ' ') * Printf.format(FMT_F8_5, shift.correction)
+    if isempty(shift.satellites)
+        return header_line(io, lead, "SYS / PHASE SHIFT")
+    end
+    # A count of zero already means "every satellite of the system", so the
+    # field carries the length of a list that is written out.
+    lead *= " "^2 * lpad(length(shift.satellites), 2, '0')
+    for (i, chunk) in
+        enumerate(Iterators.partition(shift.satellites, PHASE_SHIFT_SATELLITES_PER_LINE))
+        content =
+            (i == 1 ? lead : " "^18) *
+            join(' ' * satellite_id(system, prn) for prn in chunk)
+        header_line(io, content, "SYS / PHASE SHIFT")
+    end
+    nothing
 end
 
 add_indicator!(record::RecordBuffer, ::Nothing) = add_char!(record, ' ')
@@ -340,11 +538,15 @@ end
     write_epoch!(writer::RinexObsWriter, epoch::ObsEpoch)
 
 Append one epoch record. Writes the file header first if it has not been
-written yet.
+written yet. The whole epoch is checked before its first line is written, so
+an epoch this rejects leaves the file as it was.
 """
 function write_epoch!(writer::RinexObsWriter, epoch::ObsEpoch)
-    writer.header_written || write_obs_header(writer, epoch.time)
-    io = writer.io
+    # The epoch line and every satellite line are assembled in the buffer,
+    # and a value a field cannot hold throws while they are: nothing has
+    # reached the file at that point, so a rejected epoch leaves it as it
+    # was. Writing the lines as they were formatted used to leave a fragment
+    # behind that the epochs following it could not be told apart from.
     record = start_record!(writer.record)
     t = epoch.time
     add_char!(record, '>')
@@ -364,7 +566,7 @@ function write_epoch!(writer::RinexObsWriter, epoch::ObsEpoch)
         add_blanks!(record, 6)
         add_field!(record, FMT_F15_12, offset)
     end
-    end_record!(io, record)
+    end_line!(record)
     for sat in epoch.satellites
         types = obs_types_for(writer.header, sat.system)
         length(sat.observations) == length(types) || throw(
@@ -380,7 +582,10 @@ function write_epoch!(writer::RinexObsWriter, epoch::ObsEpoch)
         for (code, obs) in zip(types, sat.observations)
             add_observation!(record, obs, sat, code)
         end
-        end_record!(io, record)
+        end_line!(record)
     end
+    writer.header_written ||
+        write_obs_header(writer, epoch.time, epoch.fractional_second)
+    flush_record!(writer.io, record)
     nothing
 end

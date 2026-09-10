@@ -614,13 +614,30 @@ function Base.parse(::Type{RinexFileName}, name::AbstractString)
             parse(Int, fields[9]),
         ),
         period = parse_period(parse(Int, fields[10]), only(uppercase(fields[11]))),
-        interval = isnothing(fields[12]) ? nothing :
-                   parse_interval(parse(Int, fields[12]), only(uppercase(fields[13]))),
+        interval = parse_frequency(fields[12], fields[13], only(fields[15])),
         system = only(fields[14]),
         kind = only(fields[15]),
         format = fields[16],
         compression = fields[17],
     )
+end
+
+# The field is mandatory outside a navigation name, where `00U` is how a
+# name says that its data frequency is not specified. A name that leaves the
+# field out instead is not one this convention writes, and reading it would
+# come back as a different name - the one with `00U` in it.
+function parse_frequency(count, unit, kind::Char)
+    if isnothing(count)
+        uppercase(kind) == 'N' || throw(
+            ArgumentError(
+                "A file name of the data type '$kind' carries a data-frequency " *
+                "field; a frequency that is not specified is written as \"00U\", " *
+                "not left out",
+            ),
+        )
+        return nothing
+    end
+    parse_interval(parse(Int, count), only(uppercase(unit)))
 end
 
 function Base.tryparse(::Type{RinexFileName}, name::AbstractString)
