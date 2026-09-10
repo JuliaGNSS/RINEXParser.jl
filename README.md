@@ -55,6 +55,19 @@ RinexObsWriter("data.obs", header) do writer
 end
 ```
 
+Carrier phases must reach a RINEX 3 file aligned with the reference signal
+of their band (section 5.2.12), and the mandatory `SYS / PHASE SHIFT`
+records say how. A phase code the header does not name in `phase_shifts` is
+written as the reference signal of its band, which needed no correction;
+name the others:
+
+```julia
+phase_shifts = [
+    PhaseShift('G', "L2S", -0.25),  # the correction that was applied
+    PhaseShift('G', "L2W", 0.0),    # arrived aligned, nothing applied here
+]
+```
+
 Observations are addressed by observation descriptor, in any order and
 without mentioning the types a satellite has no measurement for; `SatObs`
 takes the alignment from the header (passed directly or through the writer)
@@ -64,8 +77,9 @@ positional form `SatObs('G', 2, [ObsValue(...), nothing, ...])`, aligned
 with the header's `obs_types` for the system, also remains available.
 
 `RinexObsHeader` is mutable and the header is written when the first epoch
-arrives, so `time_of_first_obs` is filled in automatically and fields that
-the data provides late can be assigned until then:
+arrives, so `time_of_first_obs` is filled in from that epoch - and assigned
+to the header, so `rinex_filename` can name the file from it afterwards -
+and fields that the data provides late can be assigned until then:
 
 ```julia
 writer.header.approx_position = position   # from the first PVT solution
@@ -124,7 +138,20 @@ A14: `aode`, `aodc`, `sath1`, `tgd1_b1_b3`, `tgd2_b2_b3`, ...). Its `toc`,
 `toe`, `week` and `transmission_time` are in BeiDou time - `week` is the
 continuous BDT week, the GPS week minus 1356 - and the Klobuchar
 coefficients go into `IonosphericCorrection("BDSA", ...)` and
-`IonosphericCorrection("BDSB", ...)` header records.
+`IonosphericCorrection("BDSB", ...)` header records - which for BDS carry
+the mandatory `time_mark` and `sv_id` of the satellite that broadcast them:
+
+```julia
+IonosphericCorrection("BDSA", (α0, α1, α2, α3); time_mark = 'A', sv_id = 6)
+```
+
+A BDS file counts the week of a leap-second event from the BDT epoch rather
+than the GPS one, which only the time system identifier of the record tells
+a reader apart:
+
+```julia
+leap_seconds = LeapSeconds(4; future_count = 4, week = 730, day = 0, time_system = "BDT")
+```
 
 A navigation file containing several constellations is marked `M: MIXED`
 automatically; set `satellite_system = 'G'` in `RinexNavHeader` for a
@@ -132,7 +159,7 @@ single-system file, which then rejects ephemerides of other
 constellations.
 
 `write_ephemeris!` skips ephemerides it has already written (same
-satellite, issue-of-data, time of ephemeris, and for Galileo the
+satellite, issue-of-data, week, time of ephemeris, and for Galileo the
 navigation message source, since I/NAV and F/NAV are separate records; a
 BeiDou record is identified by its reference times instead, since its age
 of data grows while the ephemeris stays the same), so it is safe to forward

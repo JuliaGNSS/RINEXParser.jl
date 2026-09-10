@@ -707,14 +707,19 @@ end
     @test_throws ArgumentError write_ephemeris!(writer, modify(gps_eph; sqrt_a = Inf))
     @test_throws ArgumentError write_ephemeris!(writer, modify(gal_eph; sisa = NaN))
     @test_throws ArgumentError write_ephemeris!(writer, modify(gps_eph; prn = 100))
-    # E19.12 holds a two-digit exponent, and a three-digit one only without
-    # a sign: -1e-100 takes 20 columns where 1e-100 takes 19.
+    # Section 6.8 gives the exponent of a navigation field two digits, so a
+    # value needing three is rejected whichever sign it has - `1e-100` would
+    # occupy the 19 columns of the field, but not as the number it is.
     @test_throws ArgumentError write_ephemeris!(writer, modify(gps_eph; crs = -1e-100))
+    @test_throws ArgumentError write_ephemeris!(writer, modify(gps_eph; crs = 1e-100))
     @test_throws ArgumentError write_ephemeris!(writer, modify(gps_eph; af0 = -1.5e100))
+    @test_throws ArgumentError write_ephemeris!(writer, modify(gps_eph; af0 = 1.5e100))
+    # The largest and smallest a two-digit exponent reaches still fit.
     lines = written_lines(RinexNavWriter, RinexNavHeader()) do w
-        @test write_ephemeris!(w, modify(gps_eph; crs = 1e-100))
+        @test write_ephemeris!(w, modify(gps_eph; crs = 1e-99, cuc = -9.9e99))
     end
-    @test body_lines(lines)[2][24:42] == "1.000000000000E-100"
+    @test body_lines(lines)[2][24:42] == " 1.000000000000E-99"
+    @test body_lines(lines)[3][5:23] == "-9.900000000000E+99"
 
     @testset "the record buffer reserves what a format can produce" begin
         # Every value of every record format, not only the ones the guards
@@ -1120,4 +1125,430 @@ end
         @test isfile(path)
         @test label(first(readlines(path))) == "RINEX VERSION / TYPE"
     end
+end
+
+@testset "a rejected record leaves the file as it was" begin
+    # Validation used to happen as the record was written, so a value the
+    # writer could not hold left a fragment of it in the file - and the next
+    # record was appended behind the fragment, where nothing tells the two
+    # apart.
+    header = RinexObsHeader(obs_types = ['G' => ["C1C", "L1C"]])
+    io = IOBuffer()
+    writer = RinexObsWriter(io, header)
+    good = ObsEpoch(
+        DateTime(2020, 1, 1, 0, 0, 0),
+        [SatObs('G', 1, [ObsValue(1.0), nothing])],
+    )
+    write_epoch!(writer, good)
+    # The second satellite of the epoch carries a value of more columns than
+    # its field, which is found before the epoch line is written.
+    bad = ObsEpoch(
+        DateTime(2020, 1, 1, 0, 0, 30),
+        [
+            SatObs('G', 1, [ObsValue(1.0), nothing]),
+            SatObs('G', 2, [ObsValue(1e14), nothing]),
+        ],
+    )
+    @test_throws ArgumentError write_epoch!(writer, bad)
+    # And so is a satellite carrying the wrong number of observations.
+    @test_throws ArgumentError write_epoch!(
+        writer,
+        ObsEpoch(DateTime(2020, 1, 1, 0, 1, 0), [SatObs('G', 3, [ObsValue(1.0)])]),
+    )
+    write_epoch!(writer, ObsEpoch(DateTime(2020, 1, 1, 0, 1, 30), good.satellites))
+    close(writer)
+    body = body_lines(readlines(seekstart(io)))
+    # Two epochs of one satellite each, and nothing of the rejected ones.
+    @test length(body) == 4
+    @test [l[1] for l in body] == ['>', 'G', '>', 'G']
+    @test body[3][1:26] == "> 2020 01 01 00 01 30.0000"
+
+    # The same for an ephemeris, whose record is eight lines long.
+    io = IOBuffer()
+    writer = RinexNavWriter(io, RinexNavHeader(satellite_system = 'G'))
+    write_ephemeris!(writer, gps_eph)
+    # Broadcast orbit line 6 of this one carries a value that is not finite.
+    @test_throws ArgumentError write_ephemeris!(
+        writer,
+        modify(gps_eph; prn = 14, tgd = NaN),
+    )
+    write_ephemeris!(writer, modify(gps_eph; prn = 15))
+    close(writer)
+    body = body_lines(readlines(seekstart(io)))
+    @test length(body) == 16
+    @test [body[1][1:3], body[9][1:3]] == ["G13", "G15"]
+
+    # A rejected epoch does not write the header either, so a writer that
+    # never saw a valid record still produces a header-only file.
+    io = IOBuffer()
+    RinexObsWriter(io, RinexObsHeader(obs_types = ['G' => ["C1C"]])) do w
+        @test_throws ArgumentError write_epoch!(
+            w,
+            ObsEpoch(DateTime(2020, 1, 1), [SatObs('G', 1, [ObsValue(1e14)])]),
+        )
+    end
+    @test isempty(body_lines(readlines(seekstart(io))))
+end
+
+@testset "event flags that carry no observations are rejected" begin
+    satellites = [SatObs('G', 1, [ObsValue(1.0)])]
+    @test ObsEpoch(DateTime(2020, 1, 1), satellites; flag = 0).flag == 0
+    # A power failure since the previous epoch is still an observation
+    # record, so it is the one other flag this writer produces.
+    @test ObsEpoch(DateTime(2020, 1, 1), satellites; flag = 1).flag == 1
+    # Flags 2-5 introduce header records, which this writer does not write:
+    # the satellite lines it would append are not what follows such a line.
+    for flag in (2, 3, 4, 5, 6, -1)
+        @test_throws ArgumentError ObsEpoch(DateTime(2020, 1, 1), satellites; flag = flag)
+    end
+end
+
+@testset "header fields keep to their own columns" begin
+    types = ['G' => ["C1C"]]
+    # A field of more columns than the record gives it does not extend the
+    # record: it overwrites the field that follows, or pushes the label out
+    # of columns 61-80. Checked when the writer is created, so it does not
+    # surface from the lazy header write inside `close`.
+    @test_throws ArgumentError RinexObsWriter(
+        IOBuffer(),
+        RinexObsHeader(obs_types = types, receiver_number = "X"^21),
+    )
+    @test_throws ArgumentError RinexObsWriter(
+        IOBuffer(),
+        RinexObsHeader(obs_types = types, marker_name = "X"^61),
+    )
+    @test_throws ArgumentError RinexObsWriter(
+        IOBuffer(),
+        RinexObsHeader(obs_types = types, agency = "X"^41),
+    )
+    @test_throws ArgumentError RinexNavWriter(IOBuffer(), RinexNavHeader(program = "X"^21))
+    # The widest value each field holds is still written.
+    lines = written_lines(
+        RinexObsWriter,
+        RinexObsHeader(
+            obs_types = types,
+            marker_name = "X"^60,
+            receiver_number = "R"^20,
+            receiver_type = "T"^20,
+            receiver_version = "V"^20,
+        ),
+    ) do writer
+    end
+    @test all(length(l) <= 80 for l in lines)
+    @test label(lines[3]) == "MARKER NAME"
+    @test content(lines[6]) == "R"^20 * "T"^20 * "V"^20
+end
+
+@testset "the loss-of-lock indicator is three bits" begin
+    @test ObsValue(1.0; lli = 7).lli == 7
+    @test_throws ArgumentError ObsValue(1.0; lli = 8)
+    # The signal strength keeps its own range, 0 included: it is what a
+    # receiver reports for a projection it does not have yet.
+    @test ObsValue(1.0; ssi = 9).ssi == 9
+    @test ObsValue(1.0; ssi = 0).ssi == 0
+    @test_throws ArgumentError ObsValue(1.0; ssi = 10)
+end
+
+@testset "the time of the first observation reaches the header" begin
+    # Taken from the first epoch, it is assigned to the header, so that the
+    # file can be named from the header once it has been written.
+    header = RinexObsHeader(obs_types = ['G' => ["C1C"]], interval = 30.0)
+    epoch = ObsEpoch(
+        DateTime(2020, 6, 8, 10, 0, 0),
+        [SatObs('G', 1, [ObsValue(1.0)])];
+        fractional_second = 1.234e-4,
+    )
+    lines = written_lines(RinexObsWriter, header) do writer
+        write_epoch!(writer, epoch)
+        @test writer.header.time_of_first_obs == DateTime(2020, 6, 8, 10, 0, 0)
+    end
+    @test header.time_of_first_obs == DateTime(2020, 6, 8, 10, 0, 0)
+    @test rinex_filename(header; station = "ROOF", country = "DEU") ==
+          "ROOF00DEU_R_20201601000_00U_30S_GO.rnx"
+    # The record carries the sub-millisecond part of the epoch the time came
+    # from; the field is wide enough for it.
+    first_obs = only(filter(l -> label(l) == "TIME OF FIRST OBS", lines))
+    @test content(first_obs) ==
+          "  2020     6     8    10     0    0.0001234     GPS"
+
+    # A time the header was given has no fractional part of its own.
+    given = RinexObsHeader(
+        obs_types = ['G' => ["C1C"]],
+        time_of_first_obs = DateTime(2020, 6, 8, 10, 0, 0),
+    )
+    lines = written_lines(RinexObsWriter, given) do writer
+        write_epoch!(writer, epoch)
+    end
+    first_obs = only(filter(l -> label(l) == "TIME OF FIRST OBS", lines))
+    @test content(first_obs) ==
+          "  2020     6     8    10     0    0.0000000     GPS"
+end
+
+@testset "phase shifts say what was done to the carrier phase" begin
+    # Section 5.2.12 gives the record three readings, and the file has to
+    # pick one: a correction, a zero for data that arrived aligned, or a
+    # blank for the reference signal of the band.
+    header = RinexObsHeader(
+        obs_types = ['G' => ["C1C", "L1C", "L2S", "L2W"], 'E' => ["L1C", "L8Q"]],
+        phase_shifts = [
+            PhaseShift('G', "L2S", -0.25),
+            PhaseShift('G', "L2W", 0.0),
+            PhaseShift('E', "L8Q", -0.25; satellites = [3, 5]),
+        ],
+    )
+    lines = written_lines(RinexObsWriter, header) do writer
+    end
+    shifts = filter(l -> label(l) == "SYS / PHASE SHIFT", lines)
+    @test content.(shifts) == [
+        "G L1C",
+        "G L2S -0.25000",
+        "G L2W  0.00000",
+        "E L1C",
+        "E L8Q -0.25000  02 E03 E05",
+    ]
+    # The correction lands in the columns the format gives it, F8.5 after
+    # the code, and the satellite count in columns 17-18.
+    @test shifts[2][1:14] == "G L2S -0.25000"
+    @test shifts[5][15:18] == "  02"
+
+    # More than ten satellites continue on further records, indented past
+    # the fields they repeat.
+    many = RinexObsHeader(
+        obs_types = ['G' => ["L2S"]],
+        phase_shifts = [PhaseShift('G', "L2S", -0.25; satellites = 1:12)],
+    )
+    lines = written_lines(RinexObsWriter, many) do writer
+    end
+    shifts = filter(l -> label(l) == "SYS / PHASE SHIFT", lines)
+    @test length(shifts) == 2
+    @test content(shifts[1]) ==
+          "G L2S -0.25000  12 G01 G02 G03 G04 G05 G06 G07 G08 G09 G10"
+    @test content(shifts[2]) == " "^18 * " G11 G12"
+
+    # A shift naming a code the header does not declare is a typo, not a
+    # record, and is caught when the writer is created.
+    @test_throws ArgumentError RinexObsWriter(
+        IOBuffer(),
+        RinexObsHeader(
+            obs_types = ['G' => ["L1C"]],
+            phase_shifts = [PhaseShift('G', "L2S", -0.25)],
+        ),
+    )
+    # The record corrects a carrier phase, not a pseudorange.
+    @test_throws ArgumentError PhaseShift('G', "C1C", 0.0)
+    @test_throws ArgumentError PhaseShift('X', "L1C", 0.0)
+end
+
+@testset "BDS header records carry what the format makes mandatory" begin
+    # Table A5 makes the time mark and the satellite number mandatory for a
+    # BDS ionospheric correction: the constellation broadcasts several sets
+    # a day, and a reader has to tell them apart.
+    @test_throws ArgumentError IonosphericCorrection("BDSA", (1.0, 0.0, 0.0, 0.0))
+    @test_throws ArgumentError IonosphericCorrection(
+        "BDSB",
+        (1.0, 0.0, 0.0, 0.0);
+        time_mark = 'A',
+    )
+    @test_throws ArgumentError IonosphericCorrection(
+        "BDSA",
+        (1.0, 0.0, 0.0, 0.0);
+        time_mark = 'Y',
+        sv_id = 6,
+    )
+    # Optional for the other constellations, which keep working without.
+    @test IonosphericCorrection("GPSA", (1.0, 0.0, 0.0, 0.0)).time_mark === nothing
+
+    header = RinexNavHeader(
+        satellite_system = 'C',
+        ionospheric_corrections = [
+            IonosphericCorrection(
+                "BDSA",
+                (1.1176e-8, 2.9802e-8, -4.1723e-7, 4.7684e-7);
+                time_mark = 'A',
+                sv_id = 6,
+            ),
+        ],
+        # A BDS file counts the leap-second week from the BDT epoch, which
+        # only the time system identifier tells a reader.
+        leap_seconds = LeapSeconds(4; future_count = 4, week = 730, day = 0,
+                                   time_system = "BDT"),
+    )
+    lines = written_lines(RinexNavWriter, header) do writer
+        write_ephemeris!(writer, bds_eph)
+    end
+    iono = only(filter(l -> label(l) == "IONOSPHERIC CORR", lines))
+    @test content(iono) ==
+          "BDSA   1.1176E-08  2.9802E-08 -4.1723E-07  4.7684E-07 A  6"
+    # `A4,1X`, `4D12.4`, then the time mark as `1X,A1` and the satellite
+    # number as `1X,I2`.
+    @test iono[55] == 'A'
+    @test iono[57:58] == " 6"
+    leap = only(filter(l -> label(l) == "LEAP SECONDS", lines))
+    # `4I6,A3`: the identifier follows the day number with no separator.
+    @test content(leap) == "     4     4   730     0BDT"
+    @test leap[25:27] == "BDT"
+    # It lands in the same columns when the counts between are blank.
+    blank = written_lines(
+        RinexNavWriter,
+        RinexNavHeader(
+            satellite_system = 'C',
+            leap_seconds = LeapSeconds(4; time_system = "BDT"),
+        ),
+    ) do writer
+        write_ephemeris!(writer, bds_eph)
+    end
+    @test only(filter(l -> label(l) == "LEAP SECONDS", blank))[25:27] == "BDT"
+
+    # Blank defaults to GPS, which is what a file that says nothing gets.
+    plain = written_lines(RinexNavWriter, RinexNavHeader(leap_seconds = 18)) do writer
+        write_ephemeris!(writer, gps_eph)
+    end
+    @test content(only(filter(l -> label(l) == "LEAP SECONDS", plain))) == "    18"
+    # An Int and a 4-tuple still name a record, as they did before.
+    @test RinexNavHeader(leap_seconds = (18, 18, 2185, 7)).leap_seconds.week == 2185
+    @test RinexNavHeader(leap_seconds = 18).leap_seconds.count == 18
+    # Only the two identifiers the format defines, and the day number is
+    # counted the way the named system counts it.
+    @test_throws ArgumentError LeapSeconds(18; time_system = "GAL")
+    @test_throws ArgumentError LeapSeconds(18; day = 0)
+    @test_throws ArgumentError LeapSeconds(4; day = 7, time_system = "BDT")
+end
+
+@testset "ephemerides of different weeks are different records" begin
+    # `toe` is a second of the week and the issue of data a counter that
+    # wraps, so neither separates two ephemerides a week apart.
+    lines = written_lines(RinexNavWriter, RinexNavHeader()) do writer
+        @test write_ephemeris!(writer, gps_eph)
+        @test !write_ephemeris!(writer, gps_eph)
+        @test write_ephemeris!(writer, modify(gps_eph; week = gps_eph.week + 1))
+        @test write_ephemeris!(writer, gal_eph)
+        @test !write_ephemeris!(writer, gal_eph)
+        @test write_ephemeris!(writer, modify(gal_eph; week = gal_eph.week + 1))
+    end
+    @test length(body_lines(lines)) == 4 * 8
+end
+
+@testset "a Galileo record cannot come from I/NAV and F/NAV at once" begin
+    # Table A8: the two messages carry different information, so a record
+    # decoded from both is not one record.
+    @test_throws ArgumentError galileo_data_sources(;
+        inav_e1b = true,
+        fnav_e5a = true,
+        inav_e5b = true,
+        clock_e5b_e1 = true,
+    )
+    # The pairs a receiver does produce are unaffected.
+    @test galileo_data_sources(; inav_e1b = true, inav_e5b = true, clock_e5b_e1 = true) ==
+          517.0
+end
+
+@testset "an observation name carries its data-frequency field" begin
+    # `00U` is how a name says the frequency is not specified; leaving the
+    # field out is not, and reading it would come back as a different name.
+    @test_throws ArgumentError parse(
+        RinexFileName,
+        "ALGO00CAN_R_20121601000_15M_GO.rnx",
+    )
+    @test tryparse(RinexFileName, "ALGO00CAN_R_20121601000_15M_MO.rnx") === nothing
+    @test string(parse(RinexFileName, "ALGO00CAN_R_20121601000_15M_00U_GO.rnx")) ==
+          "ALGO00CAN_R_20121601000_15M_00U_GO.rnx"
+    # A navigation name has no such field and is still read without one.
+    @test string(parse(RinexFileName, "ALGO00CAN_R_20121600000_15M_GN.rnx")) ==
+          "ALGO00CAN_R_20121600000_15M_GN.rnx"
+end
+
+@testset "a header assigned after the writer is still checked" begin
+    # The header is documented as assignable until it is written, so the
+    # fields have to be checked where they are used, not only where the
+    # writer was created: a 21-column receiver number would otherwise reach
+    # the file and push the receiver type one column out of its own.
+    io = IOBuffer()
+    writer = RinexObsWriter(io, RinexObsHeader(obs_types = ['G' => ["C1C"]]))
+    writer.header.receiver_number = "R"^21
+    epoch = ObsEpoch(DateTime(2020, 1, 1), [SatObs('G', 1, [ObsValue(1.0)])])
+    @test_throws ArgumentError write_epoch!(writer, epoch)
+    # And on the path that writes the header from `close`.
+    io = IOBuffer()
+    writer = RinexObsWriter(io, RinexObsHeader(obs_types = ['G' => ["C1C"]]))
+    writer.header.marker_name = "X"^61
+    @test_throws ArgumentError close(writer)
+
+    io = IOBuffer()
+    writer = RinexNavWriter(io, RinexNavHeader())
+    writer.header.program = "P"^21
+    @test_throws ArgumentError write_ephemeris!(writer, gps_eph)
+end
+
+@testset "a phase shift that does not reach every satellite" begin
+    # One code carries one record per group of satellites it corrects, so
+    # every entry has to be written, not just the first one found.
+    header = RinexObsHeader(
+        obs_types = ['G' => ["L2S"]],
+        phase_shifts = [
+            PhaseShift('G', "L2S", -0.25; satellites = [1, 2]),
+            PhaseShift('G', "L2S", 0.0; satellites = [3]),
+        ],
+    )
+    lines = written_lines(RinexObsWriter, header) do writer
+    end
+    @test content.(filter(l -> label(l) == "SYS / PHASE SHIFT", lines)) ==
+          ["G L2S -0.25000  02 G01 G02", "G L2S  0.00000  01 G03"]
+
+    # A satellite cannot be told two corrections for one carrier phase.
+    overlapping = RinexObsHeader(
+        obs_types = ['G' => ["L2S"]],
+        phase_shifts = [
+            PhaseShift('G', "L2S", -0.25; satellites = [1, 2]),
+            PhaseShift('G', "L2S", 0.0; satellites = [2, 3]),
+        ],
+    )
+    @test_throws ArgumentError RinexObsWriter(IOBuffer(), overlapping)
+    # An empty list already claims every satellite of the system.
+    @test_throws ArgumentError RinexObsWriter(
+        IOBuffer(),
+        RinexObsHeader(
+            obs_types = ['G' => ["L2S"]],
+            phase_shifts = [PhaseShift('G', "L2S", -0.25), PhaseShift('G', "L2S", 0.0)],
+        ),
+    )
+    # Two codes of the same system keep their own records.
+    fine = RinexObsHeader(
+        obs_types = ['G' => ["L2S", "L2W"]],
+        phase_shifts = [PhaseShift('G', "L2S", -0.25), PhaseShift('G', "L2W", 0.0)],
+    )
+    @test RinexObsWriter(IOBuffer(), fine) isa RinexObsWriter
+end
+
+@testset "a phase shift keeps to the columns of its record" begin
+    # The satellite identification is three columns, and the count of the
+    # list two, so neither takes a number that would overflow them.
+    @test_throws ArgumentError PhaseShift('G', "L2S", 0.0; satellites = [100])
+    @test_throws ArgumentError PhaseShift('G', "L2S", 0.0; satellites = [0])
+    @test_throws ArgumentError PhaseShift('G', "L2S", 0.0; satellites = 1:100)
+    @test length(PhaseShift('G', "L2S", 0.0; satellites = 1:99).satellites) == 99
+    # The list is a `Vector` inside an immutable shift, so it stays open to
+    # `push!` after the constructor checked it; the header writer checks it
+    # again rather than letting a number past its columns reach the file.
+    shift = PhaseShift('G', "L2S", -0.25; satellites = [1])
+    header = RinexObsHeader(obs_types = ['G' => ["L2S"]], phase_shifts = [shift])
+    io = IOBuffer()
+    writer = RinexObsWriter(io, header)
+    push!(shift.satellites, 100)
+    @test_throws ArgumentError close(writer)
+    @test isempty(filter(l -> occursin("PHASE SHIFT", l), readlines(seekstart(io))))
+    # And the same for a list grown past the two columns that count it.
+    grown = PhaseShift('G', "L2S", -0.25; satellites = [1])
+    writer = RinexObsWriter(
+        IOBuffer(),
+        RinexObsHeader(obs_types = ['G' => ["L2S"]], phase_shifts = [grown]),
+    )
+    append!(grown.satellites, 2:100)
+    @test_throws ArgumentError close(writer)
+    # F8.5 holds the corrections the ICDs define, not an arbitrary number.
+    @test_throws ArgumentError PhaseShift('G', "L2S", 1000.0)
+    # The constructor takes a `Real`, so the correction is converted before
+    # it is measured against its field rather than after.
+    @test PhaseShift('G', "L2S", 0).correction === 0.0
+    @test PhaseShift('G', "L2S", -1 // 4).correction === -0.25
+    @test PhaseShift('G', "L2S", Float32(-0.25)).correction === -0.25
 end

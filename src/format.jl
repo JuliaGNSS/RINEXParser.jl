@@ -7,6 +7,7 @@ const FMT_F14_4 = Printf.Format("%14.4f")
 const FMT_F10_3 = Printf.Format("%10.3f")
 const FMT_F11_7 = Printf.Format("%11.7f")
 const FMT_F13_7 = Printf.Format("%13.7f")
+const FMT_F8_5 = Printf.Format("%8.5f")
 const FMT_F15_12 = Printf.Format("%15.12f")
 const FMT_E19_12 = Printf.Format("%19.12E")
 const FMT_E12_4 = Printf.Format("%12.4E")
@@ -122,12 +123,21 @@ function add_char!(record::RecordBuffer, char::Char)
 end
 
 """
-    end_record!(io, record)
+    end_line!(record)
 
-Write the assembled record to `io` as one line and reset the buffer.
+End the current line of `record`, keeping it in the buffer. A record of
+several lines - an observation epoch, an ephemeris - is assembled whole
+before any of it is written, so that a value one of its later lines cannot
+hold leaves the file without the lines before it.
 """
-function end_record!(io::IO, record::RecordBuffer)
-    add_char!(record, '\n')
+end_line!(record::RecordBuffer) = add_char!(record, '\n')
+
+"""
+    flush_record!(io, record)
+
+Write the assembled record to `io` and reset the buffer.
+"""
+function flush_record!(io::IO, record::RecordBuffer)
     bytes = record.bytes
     GC.@preserve bytes unsafe_write(io, pointer(bytes), record.position - 1)
     start_record!(record)
@@ -135,14 +145,48 @@ function end_record!(io::IO, record::RecordBuffer)
 end
 
 """
+    end_record!(io, record)
+
+Write the assembled record to `io` as one line and reset the buffer.
+"""
+end_record!(io::IO, record::RecordBuffer) = (end_line!(record); flush_record!(io, record))
+
+"""
     header_line(io, content, label)
 
 Write one RINEX header record: `content` padded to 60 columns followed by
-the record `label` (columns 61-80).
+the record `label` (columns 61-80). Content of more than 60 columns would
+push the label out of the columns a reader looks for it in, which makes the
+record unreadable rather than merely wrong, so it is rejected here as a
+last line of defence behind the per-field checks.
 """
 function header_line(io::IO, content::AbstractString, label::AbstractString)
+    length(content) <= 60 || throw(
+        ArgumentError(
+            "The content of the $label record is $(length(content)) columns wide, " *
+            "but a header record holds 60 columns before its label",
+        ),
+    )
     println(io, rpad(content, 60), label)
 end
+
+"""
+    check_header_field(value, width, description) -> String
+
+Return the header field `value`, or throw an `ArgumentError` if it is wider
+than the `width` columns the record gives it. A header field is written at
+a fixed offset, so a value of more columns than its own does not extend the
+record: it overwrites the field that follows it, or pushes the record label
+out of columns 61-80.
+"""
+check_header_field(value::AbstractString, width::Int, description) =
+    length(value) <= width ? value :
+    throw(
+        ArgumentError(
+            "$description is \"$value\", which is $(length(value)) columns wide, " *
+            "but the record holds $width columns for it",
+        ),
+    )
 
 const SYSTEM_NAMES = Dict(
     'G' => "GPS",
@@ -232,19 +276,28 @@ end
 satellite_id(system::Char, prn::Integer) = string(system, lpad(prn, 2, '0'))
 
 """
-    add_satellite_id!(record, system, prn)
+    check_satellite_number(system, prn) -> Int
 
-Append the three-column satellite identification that opens a data record.
-A satellite number outside 1-99 is rejected: it would not fit its two
-columns and shift the whole record.
+Return the satellite number `prn`, or throw an `ArgumentError` if it is
+outside 1-99: it would not fit the two columns of a satellite
+identification and shift the whole record.
 """
-function add_satellite_id!(record::RecordBuffer, system::Char, prn::Integer)
-    0 < prn < 100 || throw(
+check_satellite_number(system::Char, prn::Integer) =
+    0 < prn < 100 ? Int(prn) :
+    throw(
         ArgumentError(
             "Satellite number $prn of system '$system' does not fit the two columns " *
             "of a RINEX satellite identification, which holds 1-99",
         ),
     )
+
+"""
+    add_satellite_id!(record, system, prn)
+
+Append the three-column satellite identification that opens a data record.
+"""
+function add_satellite_id!(record::RecordBuffer, system::Char, prn::Integer)
+    check_satellite_number(system, prn)
     add_char!(record, system)
     add_integer!(record, prn, 2, UInt8('0'))
 end
@@ -289,11 +342,12 @@ end
 
 Whether `value` rendered in `E` notation with `digits` decimals fits `width`
 columns: a sign if the value is negative, the leading digit, the point, the
-decimals, `E`, the exponent sign and the exponent digits - of which `Printf`
-writes two even for a one-digit exponent. A three-digit exponent therefore
-overflows an `E19.12` field, but only for a negative value: `-1e-100` takes
-20 columns where `1e-100` takes 19. `NaN` and `Inf` do not fit either, for
-the reason given at [`fits_fixed_field`](@ref).
+decimals, `E`, the exponent sign and the two exponent digits `Printf` writes
+even for a one-digit exponent. RINEX section 6.8 gives the exponent two
+digits, so a value needing three does not fit whatever its width: `1e-100`
+would occupy the 19 columns of an `E19.12` field, but as `1.000000000000E-100`
+it is not the number a reader of the format recovers. `NaN` and `Inf` do not
+fit either, for the reason given at [`fits_fixed_field`](@ref).
 """
 function fits_scientific_field(value::Float64, digits::Int, width::Int)
     isfinite(value) || return false
@@ -301,7 +355,7 @@ function fits_scientific_field(value::Float64, digits::Int, width::Int)
     # Rounding the mantissa can carry into the exponent, and 9.9999999999996e99
     # reaches the file as 1.000000000000E+100.
     round(abs(value) / exp10(exponent); digits) >= 10 && (exponent += 1)
-    signbit(value) + 4 + digits + max(2, ndigits(exponent)) <= width
+    ndigits(exponent) <= 2 && signbit(value) + 6 + digits <= width
 end
 
 """
@@ -320,15 +374,77 @@ so that the check itself stays free of the message it never builds.
 end
 
 """
-    leap_seconds_content(leap_seconds) -> String
+    LeapSeconds(count; future_count = nothing, week = nothing, day = nothing,
+                time_system = "")
 
-Content of the `LEAP SECONDS` header record. A plain `Int` fills only the
-current leap-second count; an `NTuple{4,Int}` additionally fills the
-future/past count ΔtLSF and the week and day number of the leap-second
-event, which some parsers require.
+The `LEAP SECONDS` header record. `count` is the current number of leap
+seconds; `future_count` (ΔtLSF), `week` (WN_LSF) and `day` (DN) describe the
+leap-second event the message announces, which some parsers require.
+
+`time_system` says which system the week and day number count in: `"GPS"`
+counts weeks from 1980-01-06 and days 1-7, `"BDT"` from 2006-01-01 and days
+0-6. Only those two are valid identifiers, and the default `""` leaves the
+field blank, which a reader takes as `"GPS"` - so a BeiDou file giving
+BDT-relative values has to say `"BDT"`, or its numbers are read as GPS ones.
+
+A plain `Int` or an `NTuple{4,Int}` converts to this type, so
+`leap_seconds = 18` and `leap_seconds = (18, 18, 2185, 7)` keep working
+wherever a header takes one.
 """
-leap_seconds_content(leap_seconds::Int) = lpad(leap_seconds, 6)
-leap_seconds_content(leap_seconds::NTuple{4,Int}) = join(lpad(x, 6) for x in leap_seconds)
+struct LeapSeconds
+    count::Int
+    future_count::Union{Nothing,Int}
+    week::Union{Nothing,Int}
+    day::Union{Nothing,Int}
+    time_system::String
+    function LeapSeconds(count, future_count, week, day, time_system)
+        time_system in ("", "GPS", "BDT") || throw(
+            ArgumentError(
+                "The time system of a LEAP SECONDS record is \"GPS\" or \"BDT\", " *
+                "or \"\" to leave the field blank, not \"$time_system\"",
+            ),
+        )
+        # The day number counts the day before the event, from the first day
+        # of the week of the respective system.
+        if !isnothing(day)
+            days = time_system == "BDT" ? (0:6) : (1:7)
+            day in days || throw(
+                ArgumentError(
+                    "The day number of a LEAP SECONDS record in " *
+                    "$(isempty(time_system) ? "GPS" : time_system) time is " *
+                    "$(first(days))-$(last(days)), not $day",
+                ),
+            )
+        end
+        new(count, future_count, week, day, time_system)
+    end
+end
+LeapSeconds(
+    count::Integer;
+    future_count = nothing,
+    week = nothing,
+    day = nothing,
+    time_system = "",
+) = LeapSeconds(Int(count), future_count, week, day, String(time_system))
+
+Base.convert(::Type{LeapSeconds}, count::Integer) = LeapSeconds(count)
+Base.convert(::Type{LeapSeconds}, fields::NTuple{4,Integer}) =
+    LeapSeconds(fields[1]; future_count = fields[2], week = fields[3], day = fields[4])
+
+# A field the record does not carry is blank rather than zero, which is a
+# leap-second count of its own.
+leap_seconds_field(::Nothing) = " "^6
+leap_seconds_field(value::Int) = lpad(value, 6)
+
+# `4I6,A3`: the identifier follows the day number with no separator, so it
+# occupies columns 25-27. The four counts are always written, blank where
+# the record does not carry them, to put it there.
+leap_seconds_content(leap_seconds::LeapSeconds) =
+    lpad(leap_seconds.count, 6) *
+    leap_seconds_field(leap_seconds.future_count) *
+    leap_seconds_field(leap_seconds.week) *
+    leap_seconds_field(leap_seconds.day) *
+    leap_seconds.time_system
 
 """
     epoch_seconds(time, fractional_second) -> Float64

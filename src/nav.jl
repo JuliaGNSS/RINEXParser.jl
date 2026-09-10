@@ -1,14 +1,55 @@
 """
-    IonosphericCorrection(type, parameters)
+    IonosphericCorrection(type, parameters; time_mark = nothing, sv_id = nothing)
 
 Ionospheric correction header record, e.g. Klobuchar parameters as
 `IonosphericCorrection("GPSA", (α0, α1, α2, α3))` and
 `IonosphericCorrection("GPSB", (β0, β1, β2, β3))`.
+
+`time_mark` and `sv_id` say when the parameters were transmitted and by
+which satellite. The mark is the hour of the day of the transmission time as
+a letter, `'A'` for 00h-01h through `'X'` for 23h-24h. RINEX 3.05 Table A5
+makes both **mandatory for BDS** - a constellation broadcasting several sets
+a day, whose readers need to tell them apart - and optional elsewhere, so a
+`"BDSA"` or `"BDSB"` record without them is rejected.
 """
 struct IonosphericCorrection
     type::String
     parameters::NTuple{4,Float64}
+    time_mark::Union{Nothing,Char}
+    sv_id::Union{Nothing,Int}
+    function IonosphericCorrection(type, parameters, time_mark, sv_id)
+        type = String(type)
+        if !isnothing(time_mark)
+            time_mark in 'A':'X' || throw(
+                ArgumentError(
+                    "The time mark of an ionospheric correction is the hour of the " *
+                    "day of its transmission time as 'A' (00h-01h) to 'X' " *
+                    "(23h-24h), not '$time_mark'",
+                ),
+            )
+        end
+        if !isnothing(sv_id)
+            0 < sv_id < 100 || throw(
+                ArgumentError(
+                    "The satellite that transmitted an ionospheric correction is " *
+                    "given by its number, which holds 1-99, not $sv_id",
+                ),
+            )
+        end
+        if startswith(type, "BDS") && (isnothing(time_mark) || isnothing(sv_id))
+            throw(
+                ArgumentError(
+                    "A BDS ionospheric correction carries the time mark and the " *
+                    "satellite number of its transmission, which RINEX 3.05 makes " *
+                    "mandatory for BDS; pass time_mark and sv_id",
+                ),
+            )
+        end
+        new(type, NTuple{4,Float64}(parameters), time_mark, sv_id)
+    end
 end
+IonosphericCorrection(type, parameters; time_mark = nothing, sv_id = nothing) =
+    IonosphericCorrection(type, parameters, time_mark, sv_id)
 
 """
     TimeSystemCorrection(type, a0, a1, reference_time, reference_week)
@@ -42,7 +83,7 @@ Base.@kwdef mutable struct RinexNavHeader
     satellite_system::Union{Nothing,Char} = nothing
     ionospheric_corrections::Vector{IonosphericCorrection} = IonosphericCorrection[]
     time_system_corrections::Vector{TimeSystemCorrection} = TimeSystemCorrection[]
-    leap_seconds::Union{Nothing,Int,NTuple{4,Int}} = nothing
+    leap_seconds::Union{Nothing,LeapSeconds} = nothing
 end
 
 """
@@ -88,7 +129,10 @@ Base.@kwdef struct GPSEphemeris
 end
 
 system(::GPSEphemeris) = 'G'
-dedupe_key(eph::GPSEphemeris) = (system(eph), eph.prn, eph.iodc, eph.toe)
+# `toe` is a second of the week and `iodc` a 10-bit counter, so neither
+# separates two ephemerides of different weeks on its own: the week belongs
+# in the key, or a record would be dropped as a repeat of one a week older.
+dedupe_key(eph::GPSEphemeris) = (system(eph), eph.prn, eph.iodc, eph.week, eph.toe)
 orbit_lines(eph::GPSEphemeris) = (
     (eph.iode, eph.crs, eph.deltan, eph.m0),
     (eph.cuc, eph.e, eph.cus, eph.sqrt_a),
@@ -167,7 +211,8 @@ receiver writes are
     galileo_data_sources(; fnav_e5a = true, clock_e5a_e1 = true)  # 258, F/NAV
 
 and an I/NAV record decoded from both of its carriers sets `inav_e1b` and
-`inav_e5b` together.
+`inav_e5b` together. All three sources at once are rejected: I/NAV and F/NAV
+carry different information, so a record cannot come from both.
 """
 function galileo_data_sources(;
     inav_e1b::Bool = false,
@@ -185,6 +230,13 @@ function galileo_data_sources(;
                 "inav_e1b, fnav_e5a or inav_e5b",
             ),
         )
+    inav_e1b && fnav_e5a && inav_e5b && throw(
+        ArgumentError(
+            "The data sources of a Galileo ephemeris cannot name all three " *
+            "messages: I/NAV and F/NAV carry different information, so a record " *
+            "decoded from both is not one record (RINEX 3.05 Table A8)",
+        ),
+    )
     clock_e5a_e1 == clock_e5b_e1 && throw(
         ArgumentError(
             "A Galileo ephemeris carries the clock parameters of exactly one signal " *
@@ -233,7 +285,7 @@ system(::GalileoEphemeris) = 'E'
 # clock parameters and group delays, so RINEX 3.05 keeps them as separate
 # records: the message source is part of the record identity.
 dedupe_key(eph::GalileoEphemeris) =
-    (system(eph), eph.prn, eph.iodnav, eph.toe, eph.data_sources)
+    (system(eph), eph.prn, eph.iodnav, eph.week, eph.toe, eph.data_sources)
 orbit_lines(eph::GalileoEphemeris) = (
     (eph.iodnav, eph.crs, eph.deltan, eph.m0),
     (eph.cuc, eph.e, eph.cus, eph.sqrt_a),
@@ -364,9 +416,19 @@ end
 # Checked when the writer is created, not only when the header is written
 # out: the lazy header write happens inside `close`, where an exception
 # would leak the file handle and mask the exception of a do-block body.
-check_nav_header(header::RinexNavHeader) =
-    isnothing(header.satellite_system) ? nothing :
-    (check_satellite_system(header.satellite_system); nothing)
+function check_nav_header(header::RinexNavHeader)
+    isnothing(header.satellite_system) ||
+        check_satellite_system(header.satellite_system)
+    check_header_field(header.program, 20, "The program of the header")
+    check_header_field(header.run_by, 20, "The agency running the program")
+    for corr in header.ionospheric_corrections
+        check_header_field(corr.type, 4, "The type of an ionospheric correction")
+    end
+    for corr in header.time_system_corrections
+        check_header_field(corr.type, 4, "The type of a time system correction")
+    end
+    nothing
+end
 
 function Base.close(writer::RinexNavWriter)
     try
@@ -380,6 +442,9 @@ end
 function write_nav_header(writer::RinexNavWriter)
     io = writer.io
     header = writer.header
+    # As in the observation header: the fields stay assignable until the
+    # header is written, so they are checked again where they are used.
+    check_nav_header(header)
     systems = isnothing(header.satellite_system) ? () : (header.satellite_system,)
     version_type_line(io, "N: GNSS NAV DATA", systems)
     program_line(io, header.program, header.run_by)
@@ -387,7 +452,11 @@ function write_nav_header(writer::RinexNavWriter)
         content =
             rpad(corr.type, 4) *
             " " *
-            join(Printf.format(FMT_E12_4, p) for p in corr.parameters)
+            join(Printf.format(FMT_E12_4, p) for p in corr.parameters) *
+            # `1X,A1` and `1X,I2`, both blank where the record does not carry
+            # them - which only a BDS record cannot be.
+            (isnothing(corr.time_mark) ? " "^2 : " " * corr.time_mark) *
+            (isnothing(corr.sv_id) ? "" : " " * lpad(corr.sv_id, 2))
         header_line(io, content, "IONOSPHERIC CORR")
     end
     for corr in header.time_system_corrections
@@ -411,7 +480,8 @@ end
 # checked against them like an observation is against its own field. Unlike
 # an observation, an ephemeris field has no blank encoding that would mean
 # "not available", so a value that is not finite can only be an upstream bug
-# and is rejected instead of written as "NaN" into a numeric field.
+# and is rejected instead of written as "NaN" into a numeric field. Only a
+# spare - `nothing` - is blank, and it is the one thing not checked.
 function add_orbit_values!(
     record::RecordBuffer,
     system::Char,
@@ -453,7 +523,6 @@ end
 end
 
 function broadcast_orbit_line(
-    io::IO,
     record::RecordBuffer,
     system::Char,
     prn::Integer,
@@ -462,7 +531,7 @@ function broadcast_orbit_line(
 )
     add_blanks!(record, 4)
     add_orbit_values!(record, system, prn, line_number, values)
-    end_record!(io, record)
+    end_line!(record)
 end
 
 """
@@ -474,6 +543,9 @@ header first if necessary. Returns whether the record was written (`false`
 for an ephemeris that was already written before). Throws an
 `ArgumentError` if the header pins the file to a single constellation and
 `eph` belongs to another one.
+
+The whole record is checked before its first line is written, so an
+ephemeris this rejects leaves the file as it was.
 
 `eph` may be of any type implementing the ephemeris interface, so a
 constellation this package does not know yet can be written by defining
@@ -505,22 +577,27 @@ function write_ephemeris!(writer::RinexNavWriter, eph)
         )
     key = dedupe_key(eph)
     key in writer.written && return false
-    writer.header_written || write_nav_header(writer)
-    io = writer.io
-    record = start_record!(writer.record)
     sys = system(eph)
     prn = eph.prn
     t = eph.toc
+    # The eight lines of the record are assembled in the buffer, and a value
+    # a field cannot hold throws while they are: nothing has reached the file
+    # at that point, so a rejected ephemeris leaves it as it was. Writing the
+    # lines as they were formatted used to leave a fragment behind that the
+    # records following it could not be told apart from.
+    record = start_record!(writer.record)
     add_satellite_id!(record, sys, prn)
     add_char!(record, ' ')
     add_epoch_date!(record, t)
     add_char!(record, ' ')
     add_integer!(record, second(t), 2, UInt8('0'))
     add_orbit_values!(record, sys, prn, 0, clock_coefficients(eph))
-    end_record!(io, record)
+    end_line!(record)
     for (line_number, line) in enumerate(orbit_lines(eph))
-        broadcast_orbit_line(io, record, sys, prn, line_number, line)
+        broadcast_orbit_line(record, sys, prn, line_number, line)
     end
+    writer.header_written || write_nav_header(writer)
+    flush_record!(writer.io, record)
     push!(writer.written, key)
     true
 end
