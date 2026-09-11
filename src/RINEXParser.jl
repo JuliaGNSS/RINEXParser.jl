@@ -4,13 +4,7 @@ using Dates
 using Printf
 
 export RinexFileName, rinex_filename
-export RinexObsHeader,
-    PhaseShift,
-    ObsValue,
-    SatObs,
-    ObsEpoch,
-    RinexObsWriter,
-    write_epoch!
+export RinexObsHeader, PhaseShift, ObsValue, SatObs, ObsEpoch, RinexObsWriter, write_epoch!
 export LeapSeconds
 export RinexNavHeader,
     IonosphericCorrection,

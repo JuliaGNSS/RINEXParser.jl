@@ -96,10 +96,8 @@ The fields are
   - `compression`: `"gz"`, `"bz2"`, `"zip"`, or `nothing` for a file that is
     not compressed.
 
-Every field is checked when the name is constructed - there is no way to
-build one that holds a value its field has no room for - so a name that
-exists is a name that renders, whether that is into a path or into the report
-of a failing test.
+Construction validates every field against its fixed-width representation,
+so rendering a constructed name does not require further validation.
 
 `print` and `string` render the name, so it goes straight into a path:
 
@@ -125,9 +123,8 @@ struct RinexFileName
     format::String
     compression::Union{Nothing,String}
 
-    # Every field is checked here, in the only constructor there is: a name
-    # that exists is a name that can be written out, so rendering one - which
-    # `show` does too - cannot fail on a value a field never had room for.
+    # Validate in the inner constructor so positional construction cannot
+    # bypass the fixed-width checks.
     function RinexFileName(
         station,
         monument,
@@ -372,11 +369,8 @@ kind_description(kind::Char) =
     field_period(period) -> Union{Nothing,Dates.Period}
     field_interval(interval) -> Union{Nothing,Float64}
 
-The period and the interval as their three-column fields hold them: the one
-unit and count each is written in, read back. `Day(1) + Hour(12)` is kept as
-the `Hour(36)` of its `36H`, so that the record of a name says no more and no
-less than the name itself, and encoding them is at the same time what rejects
-a value neither field can express.
+Normalize through the three-column representation, rejecting values it
+cannot express. For example, `Day(1) + Hour(12)` becomes `Hour(36)` (`36H`).
 """
 field_period(period) = period_of_field(period_field(period))
 field_interval(interval) = interval_of_field(frequency_field(interval))

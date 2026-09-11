@@ -230,13 +230,16 @@ function galileo_data_sources(;
                 "inav_e1b, fnav_e5a or inav_e5b",
             ),
         )
-    inav_e1b && fnav_e5a && inav_e5b && throw(
-        ArgumentError(
-            "The data sources of a Galileo ephemeris cannot name all three " *
-            "messages: I/NAV and F/NAV carry different information, so a record " *
-            "decoded from both is not one record (RINEX 3.05 Table A8)",
-        ),
-    )
+    inav_e1b &&
+        fnav_e5a &&
+        inav_e5b &&
+        throw(
+            ArgumentError(
+                "The data sources of a Galileo ephemeris cannot name all three " *
+                "messages: I/NAV and F/NAV carry different information, so a record " *
+                "decoded from both is not one record (RINEX 3.05 Table A8)",
+            ),
+        )
     clock_e5a_e1 == clock_e5b_e1 && throw(
         ArgumentError(
             "A Galileo ephemeris carries the clock parameters of exactly one signal " *
@@ -417,8 +420,7 @@ end
 # out: the lazy header write happens inside `close`, where an exception
 # would leak the file handle and mask the exception of a do-block body.
 function check_nav_header(header::RinexNavHeader)
-    isnothing(header.satellite_system) ||
-        check_satellite_system(header.satellite_system)
+    isnothing(header.satellite_system) || check_satellite_system(header.satellite_system)
     check_header_field(header.program, 20, "The program of the header")
     check_header_field(header.run_by, 20, "The agency running the program")
     for corr in header.ionospheric_corrections
@@ -554,15 +556,14 @@ constellation this package does not know yet can be written by defining
   - `RINEXParser.dedupe_key(eph)`: a tuple identifying the record, see
     [`RinexNavWriter`](@ref),
   - `RINEXParser.orbit_lines(eph)`: one tuple of at most four values per
-    broadcast orbit line, in record order. A `nothing` in place of a value
-    writes a blank field, which is what a spare a value of the line follows
-    is written as; every other field is expected to hold a number, so a
-    `nothing` an accessor produces by accident blanks it rather than being
-    rejected,
+    broadcast orbit line, in record order. Use `nothing` for a blank spare
+    field. Any `nothing` returned by this method writes a blank, even when
+    the field normally requires a value,
   - `RINEXParser.clock_coefficients(eph)`: the three clock polynomial
     coefficients, which default to the `af0`, `af1` and `af2` fields,
 
-next to the `prn` and `toc` fields every record epoch line needs.
+The record must also expose `prn` (satellite number) and `toc` (`DateTime`
+in the constellation's RINEX time system) fields.
 """
 function write_ephemeris!(writer::RinexNavWriter, eph)
     pinned = writer.header.satellite_system

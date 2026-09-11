@@ -1,27 +1,3 @@
-"""
-    PhaseShift(system, code, correction; satellites = Int[])
-
-One `SYS / PHASE SHIFT` header record: the correction in cycles that was
-applied to the carrier phase `code` of `system` to align it with the
-reference signal of its band (RINEX 3.05 Table A23). `satellites` names the
-satellite numbers the correction applies to; an empty list means every
-satellite of the system, which is the usual case.
-
-RINEX 3.05 section 5.2.12 gives the record three distinct readings, and the
-one a file makes is a statement about its data:
-
-  - a **correction** (`-0.25`) says the phase was not aligned as it came out
-    of the receiver and this is what was added to align it,
-  - **zero** says the phase arrived aligned - from the receiver or from a
-    stream such as RTCM-MSM - and nothing was applied,
-  - a **blank** correction says the code is the reference signal of its band
-    and needs none. This is what a code no `PhaseShift` names is written as.
-
-The default is therefore a claim that every carrier phase in the file is a
-reference signal. A file carrying a non-reference code (GPS `L2S`, Galileo
-`L8Q`, ...) has to say which of the first two applies to it, or a reader
-cannot reconstruct what the receiver measured.
-"""
 const MAX_PHASE_SHIFT_SATELLITES = 99
 
 """
@@ -47,6 +23,30 @@ function check_phase_shift_satellites(system::Char, code, satellites)
     satellites
 end
 
+"""
+    PhaseShift(system, code, correction; satellites = Int[])
+
+One `SYS / PHASE SHIFT` header record: the correction in cycles that was
+applied to the carrier phase `code` of `system` to align it with the
+reference signal of its band (RINEX 3.05 Table A23). `satellites` names the
+satellite numbers the correction applies to; an empty list means every
+satellite of the system, which is the usual case.
+
+RINEX 3.05 section 5.2.12 gives the record three distinct readings, and the
+one a file makes is a statement about its data:
+
+  - a **correction** (`-0.25`) says the phase was not aligned as it came out
+    of the receiver and this is what was added to align it,
+  - **zero** says the phase arrived aligned - from the receiver or from a
+    stream such as RTCM-MSM - and nothing was applied,
+  - a **blank** correction says the code is the reference signal of its band
+    and needs none. This is what a code no `PhaseShift` names is written as.
+
+The default is therefore a claim that every carrier phase in the file is a
+reference signal. A file carrying a non-reference code (GPS `L2S`, Galileo
+`L8Q`, ...) has to say which of the first two applies to it, or a reader
+cannot reconstruct what the receiver measured.
+"""
 struct PhaseShift
     system::Char
     code::String
@@ -159,9 +159,7 @@ check_indicator(::Nothing, name, largest) = nothing
 check_indicator(indicator::Integer, name, largest) =
     0 <= indicator <= largest ? Int(indicator) :
     throw(
-        ArgumentError(
-            "Observation indicator $name is $indicator, but it holds 0-$largest",
-        ),
+        ArgumentError("Observation indicator $name is $indicator, but it holds 0-$largest"),
     )
 
 """
@@ -492,8 +490,7 @@ function phase_shift_lines(io::IO, system::Char, code::AbstractString, ::Nothing
     header_line(io, string(system, ' ', code), "SYS / PHASE SHIFT")
 end
 function phase_shift_lines(io::IO, system::Char, code::AbstractString, shift::PhaseShift)
-    lead =
-        string(system, ' ', code, ' ') * Printf.format(FMT_F8_5, shift.correction)
+    lead = string(system, ' ', code, ' ') * Printf.format(FMT_F8_5, shift.correction)
     if isempty(shift.satellites)
         return header_line(io, lead, "SYS / PHASE SHIFT")
     end
@@ -584,8 +581,7 @@ function write_epoch!(writer::RinexObsWriter, epoch::ObsEpoch)
         end
         end_line!(record)
     end
-    writer.header_written ||
-        write_obs_header(writer, epoch.time, epoch.fractional_second)
+    writer.header_written || write_obs_header(writer, epoch.time, epoch.fractional_second)
     flush_record!(writer.io, record)
     nothing
 end
