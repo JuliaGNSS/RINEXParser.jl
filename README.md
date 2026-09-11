@@ -5,6 +5,10 @@ carrier phase, Doppler, signal strength) and navigation files (broadcast
 ephemerides plus ionosphere and time-system corrections), plus the long
 filenames the files are named by.
 
+See the [documentation](https://JuliaGNSS.github.io/RINEXParser.jl/dev/) for
+worked examples and the API reference, and [CONTRIBUTING.md](CONTRIBUTING.md)
+for formatting, tests, and release conventions.
+
 The package is receiver-agnostic: it consumes plain record types and knows
 nothing about how the measurements were made. It follows the design of
 RTKLIB's `rinex.c` (a standalone format library) combined with GNSS-SDR's
@@ -176,7 +180,8 @@ finite is rejected instead of writing `NaN` into a numeric field.
 not modelled yet can be written by implementing the ephemeris interface -
 `RINEXParser.system`, `RINEXParser.dedupe_key`, `RINEXParser.orbit_lines`
 and optionally `RINEXParser.clock_coefficients`, see
-`?write_ephemeris!`.
+`?write_ephemeris!`. Records must also expose `prn` and `toc` fields. See the
+[ephemeris interface](docs/src/ephemeris_interface.md) for the full contract.
 
 ## File names
 
