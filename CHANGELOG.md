@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.0.1](https://github.com/JuliaGNSS/RINEXParser.jl/compare/v2.0.0...v2.0.1) (2026-09-11)
+
+
+### Bug Fixes
+
+* attach the `PhaseShift` docstring to its own type ([78babce](https://github.com/JuliaGNSS/RINEXParser.jl/commit/78babce7a54dde9618a8725cf31d6a89281f6180))
+
+
 # [2.0.0](https://github.com/JuliaGNSS/RINEXParser.jl/compare/v1.1.0...v2.0.0) (2026-09-10)
 
 
