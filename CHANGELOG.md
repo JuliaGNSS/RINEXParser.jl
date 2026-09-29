@@ -1,5 +1,7 @@
 # Changelog
 
+# [3.0.0](https://github.com/JuliaGNSS/RINEXParser.jl/compare/v2.0.1...v3.0.0) (2026-09-29)
+
 ## [2.0.1](https://github.com/JuliaGNSS/RINEXParser.jl/compare/v2.0.0...v2.0.1) (2026-09-11)
 
 
