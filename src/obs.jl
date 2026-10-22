@@ -186,8 +186,9 @@ receiver-dependent as far as a reader knows.
 declares that the epochs, code and phase were corrected by the receiver
 clock offset - a receiver that steers its epochs onto system time does so -
 and `false` that they were not. Left as `nothing`, the record is omitted,
-which a reader takes as `false`; the format requires the record when the
-epochs report a `clock_offset`.
+which a reader takes as `false`. The format requires the record when the
+epochs report a `clock_offset`, so an epoch that carries one is rejected
+while this is `nothing`.
 
 `time_of_first_obs` may be left as `nothing`; it is then taken from the
 first epoch passed to [`write_epoch!`](@ref) and assigned to the header, so
@@ -751,6 +752,15 @@ function write_epoch!(writer::RinexObsWriter, epoch::ObsEpoch)
         add_field!(record, FMT_F15_12, offset)
     end
     end_line!(record)
+    if !isnothing(epoch.clock_offset) && isnothing(writer.header.clock_offset_applied)
+        throw(
+            ArgumentError(
+                "The epoch reports a receiver clock offset, which RINEX 3.05 only " *
+                "allows with the RCV CLOCK OFFS APPL record; set the header's " *
+                "clock_offset_applied to say whether the offset was applied",
+            ),
+        )
+    end
     for sat in epoch.satellites
         types = obs_types_for(writer.header, sat.system)
         length(sat.observations) == length(types) || throw(

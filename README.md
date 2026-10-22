@@ -276,4 +276,6 @@ hardware clock steering for this: once a PVT solution provides the clock
 offset, schedule the measurement epochs at the sample instants
 corresponding to integer GPS seconds and propagate code and carrier phase
 to that instant. Any residual offset can be reported per epoch via
-`clock_offset`.
+`clock_offset`, which RINEX allows only together with the `RCV CLOCK OFFS
+APPL` record: set the header's `clock_offset_applied` to say whether the
+epochs were corrected by it.
