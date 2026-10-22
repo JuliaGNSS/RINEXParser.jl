@@ -109,6 +109,13 @@ writer.header.approx_position = position   # from the first PVT solution
 writer.header.leap_seconds = leap_seconds  # decoded from the navigation message
 ```
 
+A GLONASS file lists the frequency channel of each slot it observes, as
+`glonass_slots = [1 => 1, 2 => -4, ...]`, and the code-phase biases of
+`C1C`, `C1P`, `C2C` and `C2P` as `glonass_code_phase_biases` - zeros for
+aligned data, or `nothing` when they are not known. A GLONASS satellite with
+no frequency channel in the header is rejected, because its carrier
+frequency could not be reconstructed.
+
 The file is written in the time system of its constellation (`GPS`, `GAL`,
 `BDT`, ...), and a file carrying several constellations in GPS time, as
 RINEX prescribes for mixed files.
