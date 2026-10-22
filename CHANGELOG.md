@@ -1,5 +1,98 @@
 # Changelog
 
+# [3.0.0](https://github.com/JuliaGNSS/RINEXParser.jl/compare/v2.0.2...v3.0.0) (2026-10-22)
+
+
+* feat(obs)!: accept only the observation codes RINEX 3.05 defines ([a781b64](https://github.com/JuliaGNSS/RINEXParser.jl/commit/a781b64773bb917bccef203b3579606c9dc2de99))
+* feat(obs)!: write the GLONASS frequency channels and code-phase biases ([efe2c36](https://github.com/JuliaGNSS/RINEXParser.jl/commit/efe2c366690e50f79d7989dff62f2fdf5f685dfe))
+* fix(filename)!: read an unspecified field only as 00U ([73fa2bb](https://github.com/JuliaGNSS/RINEXParser.jl/commit/73fa2bb05c0178137f307c703cb11a78a8b8beea))
+* fix(nav)!: accept only the ionospheric correction types of Table A5 ([03bebbf](https://github.com/JuliaGNSS/RINEXParser.jl/commit/03bebbf5567113eca225ab402286ffbb14f1e8e7))
+* fix(nav)!: derive the Galileo clock bits from the message source ([83fb72b](https://github.com/JuliaGNSS/RINEXParser.jl/commit/83fb72b9fcf1f8311ac75a7e2d12064405bac6f3))
+* fix(nav)!: reject a toc with milliseconds ([efe4392](https://github.com/JuliaGNSS/RINEXParser.jl/commit/efe439267e5fae22de92fa3ccfd2a0867f32912f))
+* fix(obs)!: declare each system and each observation code once ([e349974](https://github.com/JuliaGNSS/RINEXParser.jl/commit/e3499745a19b3efbe6977bee3267be72df64af8b))
+* fix(obs)!: keep the loss-of-lock indicator to the carrier phase ([58d7bd8](https://github.com/JuliaGNSS/RINEXParser.jl/commit/58d7bd8264c64790a2eb320f19d21de485b1cd08))
+* fix(obs)!: keep the seconds of an epoch below 60 ([3f735bc](https://github.com/JuliaGNSS/RINEXParser.jl/commit/3f735bc2a889eb406022a54e798f7c476bc45f2f))
+* fix(obs)!: require RCV CLOCK OFFS APPL for a reported clock offset ([c8ebe41](https://github.com/JuliaGNSS/RINEXParser.jl/commit/c8ebe4106b3c98c058fbd338b937de0bbe17e565))
+* refactor!: name the API after the terms of RINEX 3.05 ([678b6a8](https://github.com/JuliaGNSS/RINEXParser.jl/commit/678b6a8690bee0d868c21510d2bf3183951bf1a3))
+
+
+### Bug Fixes
+
+* **filename:** take the data source as a string, and name the missing start time ([4fc9e67](https://github.com/JuliaGNSS/RINEXParser.jl/commit/4fc9e674e687312e012eacafe925fea711b96af4))
+* **nav:** write a new record when the contents change under the same issue of data ([330771f](https://github.com/JuliaGNSS/RINEXParser.jl/commit/330771fe2a2f5bab242a3cdb3b48d5701454ce56))
+
+
+### Features
+
+* **obs:** name the indicator bits and add the clock and signal-strength records ([12e653c](https://github.com/JuliaGNSS/RINEXParser.jl/commit/12e653ca3adb2ed5ac7d55c924bef51eeb58feef))
+
+
+### BREAKING CHANGES
+
+* Rename `RinexObsHeader(; obs_types)` to `obs_codes`,
+`RinexFileName`'s `kind` (field and keyword) to `file_type`, and the
+ephemeris extension method `RINEXParser.system` to
+`RINEXParser.satellite_system`. The integer ephemeris fields listed above
+and the results of `galileo_data_sources` and `galileo_sv_health` are
+`Int`; a whole-number float still converts on construction, a fraction
+throws an `InexactError`. The RINEX VERSION / TYPE record writes
+`M: Mixed` and `E: Galileo` instead of `M: MIXED` and `E: GALILEO`.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+* `parse(RinexFileName, name)` rejects a non-zero count with
+the unit `U`, and `tryparse` returns `nothing` for it.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+* `write_ephemeris!` rejects an ephemeris whose `toc` has
+milliseconds with an `ArgumentError`.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+* An `IonosphericCorrection` type outside Table A5, a GAL
+correction with a non-zero fourth value, and a non-GAL one without four
+values are rejected with an `ArgumentError`.
+`IonosphericCorrection("GAL", ...).parameters` is a 3-tuple.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+* `galileo_data_sources` no longer takes `clock_e5a_e1` or
+`clock_e5b_e1`; drop them, the bit follows from `fnav_e5a` or from
+`inav_e1b`/`inav_e5b`. A source mixing `fnav_e5a` with `inav_e1b` or
+`inav_e5b` is rejected with an `ArgumentError`.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+* An epoch with observations of a GLONASS satellite whose
+slot is not in the header's `glonass_slots` is rejected with an
+`ArgumentError`.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+* An epoch with a `clock_offset` is rejected while
+`clock_offset_applied` is `nothing`; set it to `false` (or `true`) to keep
+writing offsets.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+* A header listing a system twice in `obs_types`, or a code
+twice in one system's list, is rejected with an `ArgumentError` when the
+writer is created.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+* An `ObsEpoch` with `abs(fractional_second) >= 0.001` is
+rejected with an `ArgumentError`; the fraction carries only what lies
+below the milliseconds of the `DateTime`.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+* An epoch giving a non-zero `lli` to an observation other
+than a carrier phase is rejected by `write_epoch!`; set the indicator on
+the `L` observation only.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+* A header declaring an observation code RINEX 3.05 does
+not define for its constellation - such as `C1I` or `C1C` for BDS, `C1N`
+for GPS, or a lowercase or incomplete descriptor - is now rejected with an
+`ArgumentError` when the writer is created, and a `PhaseShift` naming one
+when it is constructed. Use the code of Tables 14-20 for the signal, for
+BDS B1I `C2I`/`L2I`/`D2I`/`S2I`.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
 ## [2.0.2](https://github.com/JuliaGNSS/RINEXParser.jl/compare/v2.0.1...v2.0.2) (2026-09-30)
 
 No changes to the package. Replaces the accidental 3.0.0 release.
