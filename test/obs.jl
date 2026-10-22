@@ -191,7 +191,7 @@
         end
         @test time_system(['G' => ["C1C"]]) == "GPS"
         @test time_system(['E' => ["C1C"]]) == "GAL"
-        @test time_system(['C' => ["C1C"]]) == "BDT"
+        @test time_system(['C' => ["C2I"]]) == "BDT"
         # A mixed file is written in GPS time.
         @test time_system(['G' => ["C1C"], 'E' => ["C1C"]]) == "GPS"
     end
@@ -536,4 +536,67 @@ end
         IOBuffer(),
         RinexObsHeader(obs_types = ['G' => ["S1C"]], signal_strength_unit = "D"^21),
     )
+end
+
+@testset "observation codes follow RINEX 3.05 Tables 14-20" begin
+    accepts(system, codes...) =
+        RinexObsWriter(
+            IOBuffer(),
+            RinexObsHeader(obs_types = [system => collect(codes)]),
+        ) isa RinexObsWriter
+    rejects(system, code) =
+        try
+            RinexObsWriter(IOBuffer(), RinexObsHeader(obs_types = [system => [code]]))
+            false
+        catch error
+            error isa ArgumentError
+        end
+
+    # The codes of the example records of Table 21.
+    @test accepts('G', split("C1C L1C D1C S1C C1W S1W C2W L2W D2W S2W C2L L2L D2L S2L")...)
+    @test accepts('G', split("C5Q L5Q D5Q S5Q C1L L1L D1L S1L")...)
+    @test accepts('E', split("C1C L1C D1C S1C C6C L6C D6C S6C C5Q L5Q D5Q S5Q C7Q")...)
+    @test accepts('E', split("L7Q D7Q S7Q C8Q L8Q D8Q S8Q")...)
+    @test accepts('S', split("C1C L1C D1C S1C C5I L5I D5I S5I")...)
+    @test accepts('R', split("C1C L1C D1C S1C C1P L1P D1P S1P C2P L2P D2P S2P C2C")...)
+    @test accepts('R', split("L2C D2C S2C C3Q L3Q D3Q S3Q C4A L6X")...)
+    @test accepts('C', split("C1P L1P D1P S1P C5P L5P D5P S5P C2I L2I D2I S2I C7I")...)
+    @test accepts('C', split("L7I D7I S7I C6I L6I D6I S6I C7D L7P C8X C6Z")...)
+    @test accepts('J', split("C1C L1C D1C S1C C2L L2L D2L S2L C5Q L5Q D5Q S5Q C1L")...)
+    @test accepts('J', split("L1L D1L S1L C1Z L1Z D1Z S1Z C5D C6E L1B")...)
+    @test accepts('I', split("C5A L5B D5C S5X C9A L9X")...)
+
+    # BDS B1I is band 2; band 1 is B1C and B1A.
+    @test rejects('C', "C1I")
+    @test rejects('C', "C1C")
+    # Galileo E5b and BDS B2b share band 7, each under its own attributes.
+    @test rejects('E', "C7D")
+    @test rejects('C', "C7C")
+    # Bands a system does not have.
+    @test rejects('G', "C6C")
+    @test rejects('E', "C2C")
+    @test rejects('S', "C2C")
+    # The codeless GPS tracking measures no pseudorange.
+    @test accepts('G', "L1N", "D2N", "S2N")
+    @test rejects('G', "C1N")
+    @test rejects('G', "C2N")
+    # Every field must be given, in uppercase.
+    @test rejects('G', "C1")
+    @test rejects('G', "C1 ")
+    @test rejects('G', "c1c")
+    @test rejects('G', "C1CX")
+    @test rejects('G', "P1C")
+    # Except the receiver channel number, whose attribute is blank.
+    @test accepts('G', "C1C", "X1 ")
+    @test rejects('G', "X1C")
+    @test rejects('G', "X6 ")
+
+    # A phase shift names a carrier phase of the tables too, which catches
+    # the code before the header is built.
+    @test_throws ArgumentError PhaseShift('C', "L1I", 0.0)
+    @test PhaseShift('C', "L2I", 0.0).code == "L2I"
+    # And so does a header completed after the writer was created.
+    writer = RinexObsWriter(IOBuffer(), RinexObsHeader(obs_types = ['G' => ["C1C"]]))
+    push!(last(writer.header.obs_types[1]), "C1I")
+    @test_throws ArgumentError close(writer)
 end

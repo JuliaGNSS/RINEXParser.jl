@@ -23,6 +23,88 @@ function check_phase_shift_satellites(system::Char, code, satellites)
     satellites
 end
 
+# The signals of RINEX 3.05 Tables 14-20: per system, each band with the
+# attributes (tracking modes or channels) it is tracked with. Every signal
+# carries the four observation types C, L, D and S, except the codeless
+# tracking of GPS, which measures no pseudorange.
+const OBSERVATION_SIGNALS = Dict(
+    'G' => ('1' => "CSLXPWYMN", '2' => "CDSLXPWYMN", '5' => "IQX"),
+    'R' => ('1' => "CP", '4' => "ABX", '2' => "CP", '6' => "ABX", '3' => "IQX"),
+    'E' => ('1' => "ABCXZ", '5' => "IQX", '7' => "IQX", '8' => "IQX", '6' => "ABCXZ"),
+    'S' => ('1' => "C", '5' => "IQX"),
+    'J' => ('1' => "CSLXZB", '2' => "SLX", '5' => "IQXDPZ", '6' => "SLXEZ"),
+    'C' => (
+        '2' => "IQX",
+        '1' => "DPXSLZ",
+        '5' => "DPX",
+        '7' => "IQXDPZ",
+        '8' => "DPX",
+        '6' => "IQXDPZ",
+    ),
+    'I' => ('5' => "ABCX", '9' => "ABCX"),
+)
+
+const OBSERVATION_CODE_TABLES =
+    Dict('G' => 14, 'R' => 15, 'E' => 16, 'S' => 17, 'J' => 18, 'C' => 19, 'I' => 20)
+
+"""
+    check_observation_code(system, code) -> code
+
+Return the observation descriptor `code`, or throw an `ArgumentError` if
+RINEX 3.05 does not define it for `system`. A descriptor is a type, a band
+and an attribute, and only the combinations of Tables 14-20 are known
+tracking modes, which section 5.2.17 makes the only ones a file may carry:
+BDS B1I is `2I` rather than `1I`, and Galileo E5b and BDS B2b share band 7
+under attributes of their own. The one other descriptor the format admits
+is the receiver channel number `X`, whose attribute is blank (section
+5.3.4).
+"""
+function check_observation_code(system::Char, code::AbstractString)
+    name = SYSTEM_NAMES[system]
+    table = "RINEX 3.05 Table $(OBSERVATION_CODE_TABLES[system])"
+    signals = OBSERVATION_SIGNALS[system]
+    bands = join(first.(signals), ", ")
+    (length(code) == 3 && first(code) in "CLDSX") || throw(
+        ArgumentError(
+            "\"$code\" is not an observation descriptor, which is a type C, L, D, " *
+            "S or X followed by a band and an attribute, as in \"C1C\"",
+        ),
+    )
+    type, band, attribute = code
+    index = findfirst(signal -> first(signal) == band, signals)
+    isnothing(index) && throw(
+        ArgumentError(
+            "Observation type \"$code\" names band $band, which $name does not " *
+            "have; its bands in $table are $bands",
+        ),
+    )
+    attributes = last(signals[index])
+    if type == 'X'
+        attribute == ' ' || throw(
+            ArgumentError(
+                "Observation type \"$code\" is a receiver channel number, whose " *
+                "attribute is blank, as in \"X$band \"",
+            ),
+        )
+    elseif !(attribute in attributes)
+        throw(
+            ArgumentError(
+                "$name has no observation type \"$code\" in $table; band $band " *
+                "is tracked with the attributes $(join(attributes, ", "))",
+            ),
+        )
+    elseif type == 'C' && system == 'G' && attribute == 'N'
+        throw(
+            ArgumentError(
+                "Observation type \"$code\" is a pseudorange of the codeless " *
+                "tracking, which measures none; $table gives it L$band$attribute, " *
+                "D$band$attribute and S$band$attribute",
+            ),
+        )
+    end
+    code
+end
+
 """
     PhaseShift(system, code, correction; satellites = Int[])
 
@@ -60,6 +142,7 @@ struct PhaseShift
                 "it can be given for; carrier phase codes start with \"L\"",
             ),
         )
+        check_observation_code(system, code)
         # Converted before it is measured against its columns, so that the
         # `Real` the constructor takes reaches the check as the `Float64` it
         # is written as.
@@ -379,7 +462,10 @@ end
 # Checked when the writer is created, so a header the records cannot hold
 # does not surface from the lazy header write inside `close`.
 function check_obs_header(header::RinexObsHeader)
-    foreach(check_satellite_system, first.(header.obs_types))
+    for (system, codes) in header.obs_types
+        check_satellite_system(system)
+        foreach(code -> check_observation_code(system, code), codes)
+    end
     check_header_field(header.program, 20, "The program of the header")
     check_header_field(header.run_by, 20, "The agency running the program")
     check_header_field(header.marker_name, 60, "The marker name")
