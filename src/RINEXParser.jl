@@ -5,6 +5,7 @@ using Printf
 
 export RinexFileName, rinex_filename
 export RinexObsHeader, PhaseShift, ObsValue, SatObs, ObsEpoch, RinexObsWriter, write_epoch!
+export loss_of_lock_indicator, signal_strength_indicator
 export LeapSeconds
 export RinexNavHeader,
     IonosphericCorrection,

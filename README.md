@@ -33,7 +33,9 @@ header = RinexObsHeader(;
     antenna_type = "UNKNOWN",
     approx_position = (4141446.0, 604023.0, 4796597.6),  # ECEF, meters
     obs_types = ['G' => ["C1C", "L1C", "D1C", "S1C"]],
+    signal_strength_unit = "DBHZ",                       # unit of the S observations
     interval = 1.0,
+    clock_offset_applied = false,  # epochs, code and phase still carry the clock
     leap_seconds = 18,
 )
 
@@ -48,7 +50,11 @@ RinexObsWriter("data.obs", header) do writer
                     'G',
                     2,
                     "C1C" => 21234567.890,                        # pseudorange [m]
-                    "L1C" => ObsValue(111583948.752; lli = 0, ssi = 7), # carrier [cycles]
+                    "L1C" => ObsValue(                            # carrier [cycles]
+                        111583948.752;
+                        lli = loss_of_lock_indicator(half_cycle = true),
+                        ssi = signal_strength_indicator(45.2),
+                    ),
                     "D1C" => -1234.567,                           # Doppler [Hz]
                     "S1C" => 45.2,                                # C/N0 [dB-Hz]
                 ),
@@ -79,6 +85,11 @@ and cannot misalign them. A value is a plain number, an `ObsValue` carrying
 the loss-of-lock and signal-strength indicators, or `nothing`. The
 positional form `SatObs('G', 2, [ObsValue(...), nothing, ...])`, aligned
 with the header's `obs_types` for the system, also remains available.
+
+`loss_of_lock_indicator` sets the bits of the loss-of-lock indicator by name
+- `loss_of_lock`, `half_cycle` for a phase whose polarity is not resolved
+yet, and `boc_tracking` - and `signal_strength_indicator` maps a C/N0 in
+dB-Hz to the 1-9 indicator by the formula of section 6.7.2.
 
 `RinexObsHeader` is mutable and the header is written when the first epoch
 arrives, so `time_of_first_obs` is filled in from that epoch - and assigned

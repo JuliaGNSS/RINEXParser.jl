@@ -455,3 +455,85 @@ end
     @test PhaseShift('G', "L2S", -1 // 4).correction === -0.25
     @test PhaseShift('G', "L2S", Float32(-0.25)).correction === -0.25
 end
+
+@testset "the loss-of-lock indicator is set by its bits" begin
+    @test loss_of_lock_indicator() == 0
+    @test loss_of_lock_indicator(loss_of_lock = true) == 1
+    # A phase tracked before the polarity of the carrier is resolved.
+    @test loss_of_lock_indicator(half_cycle = true) == 2
+    @test loss_of_lock_indicator(boc_tracking = true) == 4
+    @test loss_of_lock_indicator(loss_of_lock = true, half_cycle = true) == 3
+    @test loss_of_lock_indicator(
+        loss_of_lock = true,
+        half_cycle = true,
+        boc_tracking = true,
+    ) == 7
+    @test ObsValue(1.0; lli = loss_of_lock_indicator(half_cycle = true)).lli == 2
+end
+
+@testset "the signal-strength indicator follows Table 23" begin
+    # Every band edge of the table, and the values either side of it.
+    @test signal_strength_indicator(0.0) == 1
+    @test signal_strength_indicator(-5.0) == 1
+    @test signal_strength_indicator(11.99) == 1
+    @test signal_strength_indicator(12.0) == 2
+    @test signal_strength_indicator(17.99) == 2
+    @test signal_strength_indicator(18) == 3
+    @test signal_strength_indicator(24) == 4
+    @test signal_strength_indicator(29.99) == 4
+    @test signal_strength_indicator(30.0) == 5
+    @test signal_strength_indicator(36.0) == 6
+    @test signal_strength_indicator(42.0) == 7
+    @test signal_strength_indicator(48.0) == 8
+    @test signal_strength_indicator(53.99) == 8
+    @test signal_strength_indicator(54.0) == 9
+    @test signal_strength_indicator(70.0) == 9
+    # A signal strength that is not known is a blank indicator.
+    @test isnothing(signal_strength_indicator(NaN))
+    @test isnothing(signal_strength_indicator(Inf))
+    @test isnothing(signal_strength_indicator(-Inf))
+    @test isnothing(ObsValue(1.0; ssi = signal_strength_indicator(NaN)).ssi)
+end
+
+@testset "the optional signal strength and clock records" begin
+    header = RinexObsHeader(
+        obs_types = ['G' => ["C1C", "S1C"]],
+        signal_strength_unit = "DBHZ",
+        interval = 1.0,
+        clock_offset_applied = true,
+        leap_seconds = 18,
+    )
+    lines = written_lines(RinexObsWriter, header) do writer
+        write_epoch!(writer, ObsEpoch(DateTime(2020, 1, 1), SatObs[]))
+    end
+    header_lines = lines[1:findfirst(l->label(l)=="END OF HEADER", lines)]
+    # In the order of Table A2.
+    @test label.(header_lines[9:13]) == [
+        "SYS / # / OBS TYPES",
+        "SIGNAL STRENGTH UNIT",
+        "INTERVAL",
+        "TIME OF FIRST OBS",
+        "RCV CLOCK OFFS APPL",
+    ]
+    @test content(header_lines[10]) == "DBHZ"
+    @test content(header_lines[13]) == "     1"
+    @test all(length(l) <= 80 for l in header_lines)
+
+    not_applied = RinexObsHeader(obs_types = ['G' => ["C1C"]], clock_offset_applied = false)
+    lines = written_lines(w -> nothing, RinexObsWriter, not_applied)
+    @test content(only(filter(l -> label(l) == "RCV CLOCK OFFS APPL", lines))) == "     0"
+
+    # Both are optional, and left out unless they are given.
+    lines = written_lines(
+        w -> nothing,
+        RinexObsWriter,
+        RinexObsHeader(obs_types = ['G' => ["C1C"]]),
+    )
+    @test !any(l -> label(l) in ("SIGNAL STRENGTH UNIT", "RCV CLOCK OFFS APPL"), lines)
+
+    # The unit is an A20 field.
+    @test_throws ArgumentError RinexObsWriter(
+        IOBuffer(),
+        RinexObsHeader(obs_types = ['G' => ["S1C"]], signal_strength_unit = "D"^21),
+    )
+end
