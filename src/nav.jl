@@ -607,11 +607,15 @@ function write_ephemeris!(writer::RinexNavWriter, eph)
     sys = system(eph)
     prn = eph.prn
     t = eph.toc
-    # The eight lines of the record are assembled in the buffer, and a value
-    # a field cannot hold throws while they are: nothing has reached the file
-    # at that point, so a rejected ephemeris leaves it as it was. Writing the
-    # lines as they were formatted used to leave a fragment behind that the
-    # records following it could not be told apart from.
+    # The record epoch holds whole seconds (`I2`).
+    iszero(millisecond(t)) || throw(
+        ArgumentError(
+            "The toc of $(satellite_id(sys, prn)) is $t, but the epoch of a " *
+            "navigation record holds whole seconds",
+        ),
+    )
+    # Assembled whole before it is written, so a rejected ephemeris leaves
+    # the file as it was.
     record = start_record!(writer.record)
     add_satellite_id!(record, sys, prn)
     add_char!(record, ' ')

@@ -451,3 +451,16 @@ end
     @test record[42:53] == " "^12
     @test strip(record[6:41]) != ""
 end
+
+@testset "the record epoch holds whole seconds" begin
+    io = IOBuffer()
+    writer = RinexNavWriter(io, RinexNavHeader(satellite_system = 'G'))
+    @test_throws ArgumentError write_ephemeris!(
+        writer,
+        modify(gps_eph; toc = gps_eph.toc + Millisecond(500)),
+    )
+    @test write_ephemeris!(writer, gps_eph)
+    close(writer)
+    # The rejected record left nothing behind.
+    @test count(startswith("G13"), readlines(seekstart(io))) == 1
+end
