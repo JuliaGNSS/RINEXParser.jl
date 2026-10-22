@@ -640,3 +640,52 @@ end
     push!(last(writer.header.obs_types[1]), "C1I")
     @test_throws ArgumentError close(writer)
 end
+
+@testset "the seconds of an epoch stay below 60" begin
+    header() = RinexObsHeader(obs_types = ['G' => ["C1C"]])
+    function epoch_line(time, fractional_second)
+        lines = written_lines(RinexObsWriter, header()) do writer
+            write_epoch!(writer, ObsEpoch(time, SatObs[]; fractional_second))
+        end
+        only(filter(startswith(">"), lines))
+    end
+    # Rounding to the seven decimals of the field carries into the minute.
+    @test startswith(
+        epoch_line(DateTime(2020, 1, 1, 0, 0, 59, 999), 0.00099999999),
+        "> 2020 01 01 00 01  0.0000000",
+    )
+    @test startswith(
+        epoch_line(DateTime(2020, 12, 31, 23, 59, 59, 999), 0.00099999999),
+        "> 2021 01 01 00 00  0.0000000",
+    )
+    @test startswith(
+        epoch_line(DateTime(2020, 1, 1, 0, 0, 59, 999), 0.0009999),
+        "> 2020 01 01 00 00 59.9999999",
+    )
+    # A remainder a hair below zero borrows from the minute before, and a
+    # negative zero is written as zero.
+    @test startswith(
+        epoch_line(DateTime(2020, 1, 1, 0, 1, 0), -1.0e-4),
+        "> 2020 01 01 00 00 59.9999000",
+    )
+    @test startswith(
+        epoch_line(DateTime(2020, 1, 1, 0, 1, 0), -1.0e-19),
+        "> 2020 01 01 00 01  0.0000000",
+    )
+    # The fraction is what lies below the milliseconds of the DateTime.
+    @test_throws ArgumentError ObsEpoch(DateTime(2020), SatObs[]; fractional_second = 0.001)
+    @test_throws ArgumentError ObsEpoch(DateTime(2020), SatObs[]; fractional_second = -0.5)
+    # The time of the first observation is carried the same way.
+    lines = written_lines(RinexObsWriter, header()) do writer
+        write_epoch!(
+            writer,
+            ObsEpoch(
+                DateTime(2020, 1, 1, 0, 0, 59, 999),
+                SatObs[];
+                fractional_second = 0.00099999999,
+            ),
+        )
+    end
+    @test content(only(filter(l -> label(l) == "TIME OF FIRST OBS", lines))) ==
+          "  2020     1     1     0     1    0.0000000     GPS"
+end

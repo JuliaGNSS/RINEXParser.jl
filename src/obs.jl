@@ -390,7 +390,7 @@ obs_value(value) = throw(
 
 One observation epoch. `time` is the epoch in the file's time system (GPS
 time for a GPS file); `fractional_second` carries sub-millisecond precision
-beyond `DateTime`. `clock_offset` is the optional receiver clock offset in
+beyond `DateTime`, so it is less than a millisecond in magnitude. `clock_offset` is the optional receiver clock offset in
 seconds written at the end of the epoch record.
 
 `flag` is 0 for an ordinary epoch and 1 to mark a power failure between the
@@ -412,6 +412,16 @@ struct ObsEpoch
                 "The epoch flag is $flag, but this writer records observations, " *
                 "which is flag 0 or - for a power failure since the previous epoch " *
                 "- flag 1; the event records of flags 2-5 are not written",
+            ),
+        )
+        # A negative fraction is the floating-point remainder of splitting a
+        # time into milliseconds and the rest, which can land a hair below
+        # zero.
+        abs(fractional_second) < 1e-3 || throw(
+            ArgumentError(
+                "The fractional second of an epoch is $fractional_second, but it " *
+                "carries the part of the time below the milliseconds of the " *
+                "DateTime, which is less than 0.001 in magnitude",
             ),
         )
         new(time, fractional_second, flag, clock_offset, satellites)
@@ -594,14 +604,14 @@ function write_obs_header(writer::RinexObsWriter, first_epoch_time, first_epoch_
         fraction = 0.0
     end
     if !isnothing(header.time_of_first_obs)
-        t = header.time_of_first_obs
+        t, seconds = epoch_minute_seconds(header.time_of_first_obs, fraction)
         content =
             lpad(year(t), 6) *
             lpad(month(t), 6) *
             lpad(day(t), 6) *
             lpad(hour(t), 6) *
             lpad(minute(t), 6) *
-            Printf.format(FMT_F13_7, epoch_seconds(t, fraction)) *
+            Printf.format(FMT_F13_7, seconds) *
             " "^5 *
             time_system(first.(header.obs_types))
         header_line(io, content, "TIME OF FIRST OBS")
@@ -709,13 +719,10 @@ function write_epoch!(writer::RinexObsWriter, epoch::ObsEpoch)
     # was. Writing the lines as they were formatted used to leave a fragment
     # behind that the epochs following it could not be told apart from.
     record = start_record!(writer.record)
-    t = epoch.time
+    t, seconds = epoch_minute_seconds(epoch.time, epoch.fractional_second)
     add_char!(record, '>')
     add_char!(record, ' ')
     add_epoch_date!(record, t)
-    seconds = epoch_seconds(t, epoch.fractional_second)
-    fits_fixed_field(seconds, 7, 11) ||
-        fixed_field_error("Seconds of the epoch", seconds, 7, 11)
     add_field!(record, FMT_F11_7, seconds)
     add_blanks!(record, 2)
     add_integer!(record, epoch.flag, 1)
