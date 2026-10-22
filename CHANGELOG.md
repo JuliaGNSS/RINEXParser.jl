@@ -1,5 +1,30 @@
 # Changelog
 
+# [4.0.0](https://github.com/JuliaGNSS/RINEXParser.jl/compare/v3.0.0...v4.0.0) (2026-10-22)
+
+
+* feat(obs)!: hold the carrier phases to the reference signals of Table A23 ([164fb60](https://github.com/JuliaGNSS/RINEXParser.jl/commit/164fb6049ad8cace5f5b5e461f659c58cbce4030))
+
+
+### BREAKING CHANGES
+
+* A header whose obs_codes carry a carrier phase that
+Table A23 gives a correction other than "None" - GPS L2S or L5Q,
+Galileo L1C, BDS L1P, ... - is rejected unless phase_shifts names it.
+State the correction that aligned it, `phase_correction(system, code)`
+for the ICD value, or 0.0 for data that arrived aligned. This includes
+the codes the table only requires aligned (Galileo L1X, GPS L5X, the
+BDS-3 pilots, ...) or whose correction depends on the satellite (GPS
+L2C), for which `phase_correction` returns `nothing`; state the
+correction the receiver or converter applied. A shift limited to some
+satellites names its code, the others reading as having had nothing
+applied, as section 5.2.12 lists the satellites a correction affects.
+Codes the table states no alignment for (SBAS, the restricted signals)
+are not checked. `PhaseShift` rejects a nonzero correction for a
+reference signal, such as GPS L1C or Galileo L1B.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
 # [3.0.0](https://github.com/JuliaGNSS/RINEXParser.jl/compare/v2.0.2...v3.0.0) (2026-10-22)
 
 
