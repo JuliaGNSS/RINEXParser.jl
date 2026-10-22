@@ -726,3 +726,54 @@ end
         @test isnothing(write_epoch!(RinexObsWriter(IOBuffer(), header), epoch))
     end
 end
+
+@testset "GLONASS slots and code-phase biases" begin
+    header = RinexObsHeader(
+        obs_types = ['R' => ["C1C", "L1C"]],
+        glonass_slots = [
+            prn => channel for
+            (prn, channel) in zip(1:10, [1, -4, 5, 6, 1, -4, 5, 6, -2, -7])
+        ],
+        glonass_code_phase_biases = (-10.0, -10.123, -10.432, -10.634),
+    )
+    epoch = ObsEpoch(DateTime(2020, 1, 1), [SatObs(header, 'R', 2, "C1C" => 2.0e7)])
+    lines = written_lines(w -> write_epoch!(w, epoch), RinexObsWriter, header)
+    slots = filter(l -> label(l) == "GLONASS SLOT / FRQ #", lines)
+    @test content.(slots) == [
+        " 10 R01  1 R02 -4 R03  5 R04  6 R05  1 R06 -4 R07  5 R08  6",
+        "    R09 -2 R10 -7",
+    ]
+    @test content(only(filter(l -> label(l) == "GLONASS COD/PHS/BIS", lines))) ==
+          " C1C  -10.000 C1P  -10.123 C2C  -10.432 C2P  -10.634"
+
+    # Unknown biases leave the mandatory record blank, and the slot record
+    # is written for a file without GLONASS too.
+    lines = written_lines(
+        w -> nothing,
+        RinexObsWriter,
+        RinexObsHeader(obs_types = ['G' => ["C1C"]]),
+    )
+    @test content(only(filter(l -> label(l) == "GLONASS SLOT / FRQ #", lines))) == "  0"
+    @test content(only(filter(l -> label(l) == "GLONASS COD/PHS/BIS", lines))) == ""
+
+    # A GLONASS satellite without a frequency channel cannot be interpreted.
+    unknown = ObsEpoch(DateTime(2020, 1, 1), [SatObs(header, 'R', 24, "C1C" => 2.0e7)])
+    @test_throws ArgumentError write_epoch!(RinexObsWriter(IOBuffer(), header), unknown)
+    # And the list keeps to its fields.
+    slots(list) = RinexObsWriter(
+        IOBuffer(),
+        RinexObsHeader(obs_types = ['R' => ["C1C"]], glonass_slots = list),
+    )
+    @test slots([1 => -7, 2 => 6]) isa RinexObsWriter
+    @test_throws ArgumentError slots([1 => 7])
+    @test_throws ArgumentError slots([1 => -8])
+    @test_throws ArgumentError slots([100 => 0])
+    @test_throws ArgumentError slots([1 => 0, 1 => 1])
+    @test_throws ArgumentError RinexObsWriter(
+        IOBuffer(),
+        RinexObsHeader(
+            obs_types = ['R' => ["C1C"]],
+            glonass_code_phase_biases = (1.0e5, 0.0, 0.0, 0.0),
+        ),
+    )
+end

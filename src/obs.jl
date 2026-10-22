@@ -190,6 +190,15 @@ which a reader takes as `false`. The format requires the record when the
 epochs report a `clock_offset`, so an epoch that carries one is rejected
 while this is `nothing`.
 
+`glonass_slots` lists the frequency channel number (-7 to +6) of each
+GLONASS slot as `slot => channel`, for the mandatory `GLONASS SLOT / FRQ #`
+record; a GLONASS satellite that has observations in an epoch has to be in
+the list, or a reader cannot reconstruct its carrier frequency.
+`glonass_code_phase_biases` are the code-phase biases in meters of `C1C`,
+`C1P`, `C2C` and `C2P` for the mandatory `GLONASS COD/PHS/BIS` record:
+zeros for data that is aligned, and `nothing`, the default, for biases that
+are not known, which writes the record blank.
+
 `time_of_first_obs` may be left as `nothing`; it is then taken from the
 first epoch passed to [`write_epoch!`](@ref) and assigned to the header, so
 that [`rinex_filename`](@ref) can name the file from the header afterwards.
@@ -222,6 +231,8 @@ Base.@kwdef mutable struct RinexObsHeader
     interval::Union{Nothing,Float64} = nothing
     time_of_first_obs::Union{Nothing,DateTime} = nothing
     clock_offset_applied::Union{Nothing,Bool} = nothing
+    glonass_slots::Vector{Pair{Int,Int}} = Pair{Int,Int}[]
+    glonass_code_phase_biases::Union{Nothing,NTuple{4,Float64}} = nothing
     leap_seconds::Union{Nothing,LeapSeconds} = nothing
 end
 
@@ -510,6 +521,22 @@ function check_obs_header(header::RinexObsHeader)
     check_header_field(header.antenna_type, 20, "The antenna type")
     isnothing(header.signal_strength_unit) ||
         check_header_field(header.signal_strength_unit, 20, "The signal strength unit")
+    for (i, (slot, channel)) in enumerate(header.glonass_slots)
+        check_satellite_number('R', slot)
+        -7 <= channel <= 6 || throw(
+            ArgumentError(
+                "The frequency channel of GLONASS slot $slot is $channel, but it " *
+                "is -7 to +6",
+            ),
+        )
+        any(p -> first(p) == slot, view(header.glonass_slots, 1:(i-1))) && throw(
+            ArgumentError("GLONASS slot $slot is given more than one frequency channel"),
+        )
+    end
+    for bias in something(header.glonass_code_phase_biases, ())
+        fits_fixed_field(bias, 3, 8) ||
+            fixed_field_error("A GLONASS code-phase bias", bias, 3, 8)
+    end
     for (i, shift) in enumerate(header.phase_shifts)
         check_phase_shift_satellites(shift.system, shift.code, shift.satellites)
         codes = obs_types_for(header, shift.system)
@@ -651,14 +678,39 @@ function write_obs_header(writer::RinexObsWriter, first_epoch_time, first_epoch_
         end
         stated || phase_shift_lines(io, system, type, nothing)
     end
-    header_line(io, lpad(0, 3), "GLONASS SLOT / FRQ #")
-    header_line(io, "", "GLONASS COD/PHS/BIS")
+    glonass_slot_lines(io, header.glonass_slots)
+    glonass_bias_line(io, header.glonass_code_phase_biases)
     if !isnothing(header.leap_seconds)
         header_line(io, leap_seconds_content(header.leap_seconds), "LEAP SECONDS")
     end
     header_line(io, "", "END OF HEADER")
     writer.header_written = true
 end
+
+# `I3,1X,8(A1,I2.2,1X,I2,1X)`, continued past the count for more than
+# eight slots. An empty list still writes the record, which is mandatory.
+function glonass_slot_lines(io::IO, slots)
+    lead = lpad(length(slots), 3) * " "
+    entries = [
+        string('R', lpad(slot, 2, '0'), ' ', lpad(channel, 2), ' ') for
+        (slot, channel) in slots
+    ]
+    isempty(entries) && return header_line(io, lead, "GLONASS SLOT / FRQ #")
+    for (i, chunk) in enumerate(Iterators.partition(entries, 8))
+        header_line(io, (i == 1 ? lead : " "^4) * join(chunk), "GLONASS SLOT / FRQ #")
+    end
+end
+
+# `4(1X,A3,1X,F8.3)`, blank throughout when the biases are not known.
+glonass_bias_line(io::IO, ::Nothing) = header_line(io, "", "GLONASS COD/PHS/BIS")
+glonass_bias_line(io::IO, biases::NTuple{4,Float64}) = header_line(
+    io,
+    join(
+        string(' ', code, ' ', Printf.format(FMT_F8_3, bias)) for
+        (code, bias) in zip(("C1C", "C1P", "C2C", "C2P"), biases)
+    ),
+    "GLONASS COD/PHS/BIS",
+)
 
 # `A1,1X,A3,1X,F8.5,2X,I2.2` and then the satellite numbers as `10(1X,A3)`,
 # continued on further records - indented past the fields they repeat - when
@@ -762,6 +814,14 @@ function write_epoch!(writer::RinexObsWriter, epoch::ObsEpoch)
         )
     end
     for sat in epoch.satellites
+        sat.system != 'R' ||
+            any(p -> first(p) == sat.prn, writer.header.glonass_slots) ||
+            throw(
+                ArgumentError(
+                    "GLONASS satellite $(satellite_id('R', sat.prn)) has observations, " *
+                    "but the header's glonass_slots gives no frequency channel for it",
+                ),
+            )
         types = obs_types_for(writer.header, sat.system)
         length(sat.observations) == length(types) || throw(
             ArgumentError(
