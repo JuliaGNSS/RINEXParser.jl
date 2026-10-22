@@ -378,3 +378,10 @@ end
     @test string(parse(RinexFileName, "ALGO00CAN_R_20121600000_15M_GN.rnx")) ==
           "ALGO00CAN_R_20121600000_15M_GN.rnx"
 end
+
+@testset "an unspecified field is 00U" begin
+    @test string(parse(RinexFileName, "ROOF00DEU_R_20201601000_00U_30S_GO.rnx")) ==
+          "ROOF00DEU_R_20201601000_00U_30S_GO.rnx"
+    @test isnothing(tryparse(RinexFileName, "ROOF00DEU_R_20201601000_07U_30S_GO.rnx"))
+    @test isnothing(tryparse(RinexFileName, "ROOF00DEU_R_20201601000_01D_05U_GO.rnx"))
+end
