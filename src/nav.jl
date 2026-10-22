@@ -195,61 +195,48 @@ Base.@kwdef struct GalileoEphemeris
 end
 
 """
-    galileo_data_sources(; inav_e1b = false, fnav_e5a = false, inav_e5b = false,
-                           clock_e5a_e1 = false, clock_e5b_e1 = false) -> Float64
+    galileo_data_sources(; inav_e1b = false, fnav_e5a = false, inav_e5b = false) -> Float64
 
 The `data_sources` bit field of a [`GalileoEphemeris`](@ref) (RINEX 3.05
 Table A8), assembled from the navigation messages the record was decoded
-from and the signal pair its clock parameters, `toc` and `sisa` refer to.
+from.
 
-At least one message source is required, and exactly one clock reference:
-the two Galileo services publish separate clock corrections, so a record
-carries either the E5a/E1 or the E5b/E1 set. The two records a Galileo
-receiver writes are
+A record comes from one message type, and its clock parameters, `toc` and
+`sisa` are the ones that message broadcasts (section 5.4.3): F/NAV carries
+the E5a/E1 clock and I/NAV the E5b/E1 clock, so the clock bits (8 and 9)
+follow from the source and are set here. A receiver decoding both messages
+writes one record of each:
 
-    galileo_data_sources(; inav_e1b = true, clock_e5b_e1 = true)  # 513, I/NAV
-    galileo_data_sources(; fnav_e5a = true, clock_e5a_e1 = true)  # 258, F/NAV
+    galileo_data_sources(; inav_e1b = true)  # 513, I/NAV
+    galileo_data_sources(; fnav_e5a = true)  # 258, F/NAV
 
-and an I/NAV record decoded from both of its carriers sets `inav_e1b` and
-`inav_e5b` together. All three sources at once are rejected: I/NAV and F/NAV
-carry different information, so a record cannot come from both.
+An I/NAV record merged from both of its carriers sets `inav_e1b` and
+`inav_e5b` together. A source mixing F/NAV and I/NAV is rejected.
 """
 function galileo_data_sources(;
     inav_e1b::Bool = false,
     fnav_e5a::Bool = false,
     inav_e5b::Bool = false,
-    clock_e5a_e1::Bool = false,
-    clock_e5b_e1::Bool = false,
 )
-    inav_e1b ||
-        fnav_e5a ||
-        inav_e5b ||
-        throw(
-            ArgumentError(
-                "A Galileo ephemeris needs at least one navigation message source: " *
-                "inav_e1b, fnav_e5a or inav_e5b",
-            ),
-        )
-    inav_e1b &&
-        fnav_e5a &&
-        inav_e5b &&
-        throw(
-            ArgumentError(
-                "The data sources of a Galileo ephemeris cannot name all three " *
-                "messages: I/NAV and F/NAV carry different information, so a record " *
-                "decoded from both is not one record (RINEX 3.05 Table A8)",
-            ),
-        )
-    clock_e5a_e1 == clock_e5b_e1 && throw(
+    inav = inav_e1b || inav_e5b
+    (fnav_e5a || inav) || throw(
         ArgumentError(
-            "A Galileo ephemeris carries the clock parameters of exactly one signal " *
-            "pair: set either clock_e5a_e1 (F/NAV) or clock_e5b_e1 (I/NAV)",
+            "A Galileo ephemeris needs at least one navigation message source: " *
+            "inav_e1b, fnav_e5a or inav_e5b",
         ),
     )
-    bits =
+    (fnav_e5a && inav) && throw(
+        ArgumentError(
+            "A Galileo ephemeris comes from F/NAV or from I/NAV, which RINEX 3.05 " *
+            "writes as separate records; write one record per message",
+        ),
+    )
+    clock_e5a_e1 = fnav_e5a
+    clock_e5b_e1 = inav
+    Float64(
         inav_e1b << 0 | fnav_e5a << 1 | inav_e5b << 2 | clock_e5a_e1 << 8 |
-        clock_e5b_e1 << 9
-    Float64(bits)
+        clock_e5b_e1 << 9,
+    )
 end
 
 """
