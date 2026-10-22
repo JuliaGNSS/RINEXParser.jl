@@ -124,6 +124,7 @@ struct MinimalEphemeris
     af2::Float64
     toe::Float64
 end
-RINEXParser.system(::MinimalEphemeris) = 'J'
-RINEXParser.dedupe_key(eph::MinimalEphemeris) = (RINEXParser.system(eph), eph.prn, eph.toe)
+RINEXParser.satellite_system(::MinimalEphemeris) = 'J'
+RINEXParser.dedupe_key(eph::MinimalEphemeris) =
+    (RINEXParser.satellite_system(eph), eph.prn, eph.toe)
 RINEXParser.orbit_lines(eph::MinimalEphemeris) = ((eph.toe,),)

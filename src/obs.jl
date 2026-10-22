@@ -50,12 +50,12 @@ const OBSERVATION_CODE_TABLES =
 """
     check_observation_code(system, code) -> code
 
-Return the observation descriptor `code`, or throw an `ArgumentError` if
-RINEX 3.05 does not define it for `system`. A descriptor is a type, a band
+Return the observation code `code`, or throw an `ArgumentError` if
+RINEX 3.05 does not define it for `system`. A code is a type, a band
 and an attribute, and only the combinations of Tables 14-20 are known
 tracking modes, which section 5.2.17 makes the only ones a file may carry:
 BDS B1I is `2I` rather than `1I`, and Galileo E5b and BDS B2b share band 7
-under attributes of their own. The one other descriptor the format admits
+under attributes of their own. The one other code the format admits
 is the receiver channel number `X`, whose attribute is blank (section
 5.3.4).
 """
@@ -66,7 +66,7 @@ function check_observation_code(system::Char, code::AbstractString)
     bands = join(first.(signals), ", ")
     (length(code) == 3 && first(code) in "CLDSX") || throw(
         ArgumentError(
-            "\"$code\" is not an observation descriptor, which is a type C, L, D, " *
+            "\"$code\" is not an observation code, which is a type C, L, D, " *
             "S or X followed by a band and an attribute, as in \"C1C\"",
         ),
     )
@@ -74,7 +74,7 @@ function check_observation_code(system::Char, code::AbstractString)
     index = findfirst(signal -> first(signal) == band, signals)
     isnothing(index) && throw(
         ArgumentError(
-            "Observation type \"$code\" names band $band, which $name does not " *
+            "Observation code \"$code\" names band $band, which $name does not " *
             "have; its bands in $table are $bands",
         ),
     )
@@ -82,21 +82,21 @@ function check_observation_code(system::Char, code::AbstractString)
     if type == 'X'
         attribute == ' ' || throw(
             ArgumentError(
-                "Observation type \"$code\" is a receiver channel number, whose " *
+                "Observation code \"$code\" is a receiver channel number, whose " *
                 "attribute is blank, as in \"X$band \"",
             ),
         )
     elseif !(attribute in attributes)
         throw(
             ArgumentError(
-                "$name has no observation type \"$code\" in $table; band $band " *
+                "$name has no observation code \"$code\" in $table; band $band " *
                 "is tracked with the attributes $(join(attributes, ", "))",
             ),
         )
     elseif type == 'C' && system == 'G' && attribute == 'N'
         throw(
             ArgumentError(
-                "Observation type \"$code\" is a pseudorange of the codeless " *
+                "Observation code \"$code\" is a pseudorange of the codeless " *
                 "tracking, which measures none; $table gives it L$band$attribute, " *
                 "D$band$attribute and S$band$attribute",
             ),
@@ -158,16 +158,16 @@ PhaseShift(system::Char, code::AbstractString, correction::Real; satellites = In
     PhaseShift(system, code, correction, satellites)
 
 """
-    RinexObsHeader(; obs_types, kwargs...)
+    RinexObsHeader(; obs_codes, kwargs...)
 
 Header of a RINEX 3.05 observation file.
 
-`obs_types` maps each satellite system character to the ordered list of
-observation descriptors (RINEX table A2, e.g. `"C1C"`, `"L1C"`, `"D1C"`,
+`obs_codes` maps each satellite system character to the ordered list of
+observation codes (RINEX table A2, e.g. `"C1C"`, `"L1C"`, `"D1C"`,
 `"S1C"`) the file carries for that system. It is given as a vector of pairs
 to keep the system order deterministic:
 
-    obs_types = ['G' => ["C1C", "L1C", "D1C", "S1C"]]
+    obs_codes = ['G' => ["C1C", "L1C", "D1C", "S1C"]]
 
 `phase_shifts` carries the [`PhaseShift`](@ref) records of the carrier
 phases that were corrected to align them with the reference signal of their
@@ -222,7 +222,7 @@ Base.@kwdef mutable struct RinexObsHeader
     antenna_type::String = ""
     approx_position::Union{Nothing,NTuple{3,Float64}} = nothing
     antenna_delta_hen::NTuple{3,Float64} = (0.0, 0.0, 0.0)
-    obs_types::Vector{Pair{Char,Vector{String}}}
+    obs_codes::Vector{Pair{Char,Vector{String}}}
     phase_shifts::Vector{PhaseShift} = PhaseShift[]
     signal_strength_unit::Union{Nothing,String} = nothing
     interval::Union{Nothing,Float64} = nothing
@@ -249,7 +249,7 @@ not have yet. [`signal_strength_indicator`](@ref) derives it from a C/N₀ in
 dB-Hz.
 
 A non-finite `value` is written as a blank field, which is how RINEX
-records that an observation type carries no measurement for a satellite.
+records that an observation code carries no measurement for a satellite.
 """
 struct ObsValue
     value::Float64
@@ -289,7 +289,7 @@ number:
 The indicator is defined for carrier phase observations only - all of it,
 the BOC bit included: section 6.7.1 opens with "For phase observations
 only", and Table A3 associates the LLI with the phase observation alone. So
-[`write_epoch!`](@ref) rejects a non-zero one on any other observation type,
+[`write_epoch!`](@ref) rejects a non-zero one on any other observation code,
 and a BOC-tracked signal sets `boc_tracking` on its `L` observation.
 
     ObsValue(phase; lli = loss_of_lock_indicator(half_cycle = !polarity_known))
@@ -318,9 +318,9 @@ signal_strength_indicator(cn0::Real) =
 
 Observations of one satellite in one epoch.
 
-The first form takes the observations aligned with the header's `obs_types`
-list for `system`, using `nothing` for observation types without a
-measurement. The second form addresses them by observation descriptor
+The first form takes the observations aligned with the header's `obs_codes`
+list for `system`, using `nothing` for observation codes without a
+measurement. The second form addresses them by observation code
 instead and derives the alignment from `header` (a [`RinexObsHeader`](@ref)
 or a [`RinexObsWriter`](@ref)), which cannot be misaligned:
 
@@ -328,8 +328,8 @@ or a [`RinexObsWriter`](@ref)), which cannot be misaligned:
 
 A value is a plain number, an [`ObsValue`](@ref) carrying the loss-of-lock
 and signal-strength indicators, or `nothing` for a measurement that is not
-available in this epoch. Observation types the header declares but the call
-does not mention are left blank. Descriptors may also be given as symbols
+available in this epoch. Observation codes the header declares but the call
+does not mention are left blank. Codes may also be given as symbols
 (`:C1C`), and as any iterable of pairs instead of separate arguments.
 """
 struct SatObs
@@ -344,29 +344,29 @@ SatObs(header::RinexObsHeader, system::Char, prn::Integer, observations::Pair...
     SatObs(header, system, prn, observations)
 
 function SatObs(header::RinexObsHeader, system::Char, prn::Integer, observations)
-    types = obs_types_for(header, system)
-    values = Vector{Union{Nothing,ObsValue}}(nothing, length(types))
-    given = falses(length(types))
+    codes = obs_codes_for(header, system)
+    values = Vector{Union{Nothing,ObsValue}}(nothing, length(codes))
+    given = falses(length(codes))
     for observation in observations
         observation isa Pair || throw(
             ArgumentError(
-                "Observations addressed by observation type are given as " *
+                "Observations addressed by observation code are given as " *
                 "\"C1C\" => value pairs, not as $(typeof(observation)); the form " *
-                "taking a vector aligned with the header's obs_types is " *
+                "taking a vector aligned with the header's obs_codes is " *
                 "SatObs(system, prn, observations)",
             ),
         )
-        descriptor, value = observation
-        code = obs_code(descriptor)
-        index = findfirst(==(code), types)
+        code, value = observation
+        code = obs_code(code)
+        index = findfirst(==(code), codes)
         isnothing(index) && throw(
             ArgumentError(
-                "Observation type \"$code\" is not declared for system '$system' in " *
-                "the header, which carries $(join(types, ", "))",
+                "Observation code \"$code\" is not declared for system '$system' in " *
+                "the header, which carries $(join(codes, ", "))",
             ),
         )
         given[index] &&
-            throw(ArgumentError("Observation type \"$code\" is given more than once"))
+            throw(ArgumentError("Observation code \"$code\" is given more than once"))
         given[index] = true
         values[index] = obs_value(value)
     end
@@ -375,12 +375,12 @@ end
 
 # The two halves of an observation pair, each answering what it does not
 # accept instead of failing to convert it.
-obs_code(descriptor::AbstractString) = String(descriptor)
-obs_code(descriptor::Symbol) = String(descriptor)
-obs_code(descriptor) = throw(
+obs_code(code::AbstractString) = String(code)
+obs_code(code::Symbol) = String(code)
+obs_code(code) = throw(
     ArgumentError(
-        "An observation type is named by a string or a symbol, like \"C1C\" or " *
-        ":C1C, not by a $(typeof(descriptor))",
+        "An observation code is named by a string or a symbol, like \"C1C\" or " *
+        ":C1C, not by a $(typeof(code))",
     ),
 )
 
@@ -488,11 +488,11 @@ function check_obs_header(header::RinexObsHeader)
     # Data lines are matched to the first list of their system, so a second
     # list of a system, or a second entry of a code, would describe columns
     # no data line has.
-    for (i, (system, codes)) in enumerate(header.obs_types)
+    for (i, (system, codes)) in enumerate(header.obs_codes)
         check_satellite_system(system)
-        any(p -> first(p) == system, view(header.obs_types, 1:(i-1))) && throw(
+        any(p -> first(p) == system, view(header.obs_codes, 1:(i-1))) && throw(
             ArgumentError(
-                "The header lists observation types for system '$system' twice; " *
+                "The header lists observation codes for system '$system' twice; " *
                 "give all of them in one list",
             ),
         )
@@ -500,7 +500,7 @@ function check_obs_header(header::RinexObsHeader)
             check_observation_code(system, code)
             code in view(codes, 1:(j-1)) && throw(
                 ArgumentError(
-                    "Observation type \"$code\" is declared twice for system '$system'",
+                    "Observation code \"$code\" is declared twice for system '$system'",
                 ),
             )
         end
@@ -536,11 +536,11 @@ function check_obs_header(header::RinexObsHeader)
     end
     for (i, shift) in enumerate(header.phase_shifts)
         check_phase_shift_satellites(shift.system, shift.code, shift.satellites)
-        codes = obs_types_for(header, shift.system)
+        codes = obs_codes_for(header, shift.system)
         shift.code in codes || throw(
             ArgumentError(
                 "The phase shift of $(shift.system) $(shift.code) names an " *
-                "observation type the header does not declare for system " *
+                "observation code the header does not declare for system " *
                 "'$(shift.system)'; it declares $(join(codes, ", "))",
             ),
         )
@@ -583,16 +583,16 @@ end
 
 SatObs(writer::RinexObsWriter, args...) = SatObs(writer.header, args...)
 
-function obs_types_for(header::RinexObsHeader, system::Char)
-    index = findfirst(p -> first(p) == system, header.obs_types)
+function obs_codes_for(header::RinexObsHeader, system::Char)
+    index = findfirst(p -> first(p) == system, header.obs_codes)
     isnothing(index) && throw(
         ArgumentError(
-            "The header declares no observation types for system '$system'; it " *
+            "The header declares no observation codes for system '$system'; it " *
             "carries the systems " *
-            join(map(p -> "'$(first(p))'", header.obs_types), ", "),
+            join(map(p -> "'$(first(p))'", header.obs_codes), ", "),
         ),
     )
-    last(header.obs_types[index])
+    last(header.obs_codes[index])
 end
 
 function write_obs_header(writer::RinexObsWriter, first_epoch_time, first_epoch_fraction)
@@ -602,7 +602,7 @@ function write_obs_header(writer::RinexObsWriter, first_epoch_time, first_epoch_
     # is documented as assignable until this runs, so this is the first
     # point at which what is written out is known.
     check_obs_header(header)
-    version_type_line(io, "OBSERVATION DATA", first.(header.obs_types))
+    version_type_line(io, "OBSERVATION DATA", first.(header.obs_codes))
     program_line(io, header.program, header.run_by)
     header_line(io, header.marker_name, "MARKER NAME")
     header_line(io, header.marker_type, "MARKER TYPE")
@@ -621,9 +621,9 @@ function write_obs_header(writer::RinexObsWriter, first_epoch_time, first_epoch_
     end
     content = join(Printf.format(FMT_F14_4, x) for x in header.antenna_delta_hen)
     header_line(io, content, "ANTENNA: DELTA H/E/N")
-    for (system, types) in header.obs_types
-        for (i, chunk) in enumerate(Iterators.partition(types, 13))
-            lead = i == 1 ? string(system, "  ", lpad(length(types), 3)) : " "^6
+    for (system, codes) in header.obs_codes
+        for (i, chunk) in enumerate(Iterators.partition(codes, 13))
+            lead = i == 1 ? string(system, "  ", lpad(length(codes), 3)) : " "^6
             header_line(io, lead * join(" " .* chunk), "SYS / # / OBS TYPES")
         end
     end
@@ -654,7 +654,7 @@ function write_obs_header(writer::RinexObsWriter, first_epoch_time, first_epoch_
             lpad(minute(t), 6) *
             Printf.format(FMT_F13_7, seconds) *
             " "^5 *
-            time_system(first.(header.obs_types))
+            time_system(first.(header.obs_codes))
         header_line(io, content, "TIME OF FIRST OBS")
     end
     if !isnothing(header.clock_offset_applied)
@@ -663,17 +663,17 @@ function write_obs_header(writer::RinexObsWriter, first_epoch_time, first_epoch_
     # One record per carrier phase, which the format makes mandatory: the
     # correction that aligned it, or a blank saying it is the reference
     # signal of its band. See `PhaseShift` for what each of them claims.
-    for (system, types) in header.obs_types, type in types
-        startswith(type, "L") || continue
+    for (system, codes) in header.obs_codes, code in codes
+        startswith(code, "L") || continue
         stated = false
         # A code may carry more than one record, because a correction need
         # not apply to every satellite of the system.
         for shift in header.phase_shifts
-            (shift.system == system && shift.code == type) || continue
-            phase_shift_lines(io, system, type, shift)
+            (shift.system == system && shift.code == code) || continue
+            phase_shift_lines(io, system, code, shift)
             stated = true
         end
-        stated || phase_shift_lines(io, system, type, nothing)
+        stated || phase_shift_lines(io, system, code, nothing)
     end
     glonass_slot_lines(io, header.glonass_slots)
     glonass_bias_line(io, header.glonass_code_phase_biases)
@@ -816,18 +816,18 @@ function write_epoch!(writer::RinexObsWriter, epoch::ObsEpoch)
                     "but the header's glonass_slots gives no frequency channel for it",
                 ),
             )
-        types = obs_types_for(writer.header, sat.system)
-        length(sat.observations) == length(types) || throw(
+        codes = obs_codes_for(writer.header, sat.system)
+        length(sat.observations) == length(codes) || throw(
             ArgumentError(
                 "Satellite $(satellite_id(sat.system, sat.prn)) carries " *
                 "$(length(sat.observations)) observations, but the header declares " *
-                "$(length(types)) observation types for system '$(sat.system)'",
+                "$(length(codes)) observation codes for system '$(sat.system)'",
             ),
         )
         # Full-width lines (no trailing-blank trimming) for the benefit of
         # fixed-column parsers, matching RTKLIB and GNSS-SDR output.
         add_satellite_id!(record, sat.system, sat.prn)
-        for (code, obs) in zip(types, sat.observations)
+        for (code, obs) in zip(codes, sat.observations)
             add_observation!(record, obs, sat, code)
         end
         end_line!(record)

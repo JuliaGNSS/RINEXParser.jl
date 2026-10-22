@@ -43,7 +43,7 @@
         @test name.period == Minute(15)
         @test name.interval == 0.2
         @test name.system == 'M'
-        @test name.kind == 'O'
+        @test name.file_type == 'O'
         @test name.format == "crx"
         @test name.compression == "gz"
         @test RINEXParser.site_identification(name) == "ALGO12CAN"
@@ -172,7 +172,7 @@
         @test name(data_source = "s").data_source == 'S'
         @test_throws ArgumentError name(data_source = "RS")
         @test_throws ArgumentError name(system = 'X')
-        @test_throws ArgumentError name(kind = 'X')
+        @test_throws ArgumentError name(file_type = 'X')
         @test_throws ArgumentError name(format = "obs")
         @test_throws ArgumentError name(compression = "Z")
         # The data frequency is a number of seconds, not a period.
@@ -181,10 +181,10 @@
         @test_throws ArgumentError name(start_time = DateTime(10000))
         # The data frequency is not part of a navigation file name, and
         # Hatanaka compression applies to observation data only.
-        @test_throws ArgumentError name(kind = 'N', interval = 30.0)
-        @test_throws ArgumentError name(kind = 'N', format = "crx")
+        @test_throws ArgumentError name(file_type = 'N', interval = 30.0)
+        @test_throws ArgumentError name(file_type = 'N', format = "crx")
         # A meteorological file is MM.
-        @test_throws ArgumentError name(kind = 'M', system = 'G')
+        @test_throws ArgumentError name(file_type = 'M', system = 'G')
         # The start time is the one field with no default.
         @test_throws ArgumentError RinexFileName(; station = "ABCD", start_time = nothing)
     end
@@ -197,7 +197,7 @@
             start_time = Date(2012, 6, 8),
             period = Day(1),
             system = 'g',
-            kind = 'o',
+            file_type = 'o',
             format = "CRX",
             compression = "GZ",
         )
@@ -207,7 +207,7 @@
     @testset "the name of an observation file comes from its header" begin
         header = RinexObsHeader(;
             marker_name = "ROOF-1",
-            obs_types = ['G' => ["C1C", "L1C"]],
+            obs_codes = ['G' => ["C1C", "L1C"]],
             interval = 1.0,
         )
         # The marker name is not a site identification, so it yields the
@@ -227,7 +227,7 @@
         # and several constellations make a mixed file.
         mixed = RinexObsHeader(;
             marker_name = "ROOF12DEU",
-            obs_types = ['G' => ["C1C"], 'E' => ["C1C"]],
+            obs_codes = ['G' => ["C1C"], 'E' => ["C1C"]],
             interval = 0.1,
         )
         @test rinex_filename(mixed, DateTime(2020, 1, 1); period = Hour(1)) ==
@@ -309,16 +309,16 @@
     @testset "the data type of a name is not a keyword of its header" begin
         obs = RinexObsHeader(;
             marker_name = "ROOF00DEU",
-            obs_types = ['G' => ["C1C"]],
+            obs_codes = ['G' => ["C1C"]],
             interval = 1.0,
         )
         nav = RinexNavHeader()
         start_time = DateTime(2020, 1, 1)
         # Silently dropping these is what the interval of a navigation name
         # is not allowed to do either.
-        @test_throws ArgumentError rinex_filename(obs, start_time; kind = 'N')
+        @test_throws ArgumentError rinex_filename(obs, start_time; file_type = 'N')
         @test_throws ArgumentError rinex_filename(obs, start_time; system = 'E')
-        @test_throws ArgumentError rinex_filename(nav, start_time; kind = 'O')
+        @test_throws ArgumentError rinex_filename(nav, start_time; file_type = 'O')
         @test_throws ArgumentError rinex_filename(nav, start_time; system = 'E')
         # The fields the header does not determine stay keywords.
         @test rinex_filename(obs, start_time; station = "ZZZZ", interval = 30.0) ==
@@ -350,7 +350,7 @@
     @testset "the name a file is written to" begin
         header = RinexObsHeader(;
             marker_name = "ROOF00DEU",
-            obs_types = ['G' => ["C1C"]],
+            obs_codes = ['G' => ["C1C"]],
             interval = 1.0,
         )
         directory = mktempdir()
@@ -390,7 +390,7 @@ end
 end
 
 @testset "a missing start time names the header that lacks it" begin
-    obs = RinexObsHeader(obs_types = ['G' => ["C1C"]])
+    obs = RinexObsHeader(obs_codes = ['G' => ["C1C"]])
     message(f) =
         try
             f()

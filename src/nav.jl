@@ -137,7 +137,7 @@ Base.@kwdef struct GPSEphemeris
     af0::Float64
     af1::Float64
     af2::Float64
-    iode::Float64
+    iode::Int
     crs::Float64
     deltan::Float64
     m0::Float64
@@ -154,22 +154,23 @@ Base.@kwdef struct GPSEphemeris
     omega::Float64
     omegadot::Float64
     idot::Float64
-    codes_on_l2::Float64 = 0.0
-    week::Float64
-    l2p_data_flag::Float64 = 0.0
+    codes_on_l2::Int = 0
+    week::Int
+    l2p_data_flag::Int = 0
     sv_accuracy::Float64
-    sv_health::Float64
+    sv_health::Int
     tgd::Float64
-    iodc::Float64
+    iodc::Int
     transmission_time::Float64
     fit_interval::Float64 = 4.0
 end
 
-system(::GPSEphemeris) = 'G'
+satellite_system(::GPSEphemeris) = 'G'
 # `toe` is a second of the week and `iodc` a 10-bit counter, so neither
 # separates two ephemerides of different weeks on its own: the week belongs
 # in the key, or a record would be dropped as a repeat of one a week older.
-dedupe_key(eph::GPSEphemeris) = (system(eph), eph.prn, eph.iodc, eph.week, eph.toe)
+dedupe_key(eph::GPSEphemeris) =
+    (satellite_system(eph), eph.prn, eph.iodc, eph.week, eph.toe)
 orbit_lines(eph::GPSEphemeris) = (
     (eph.iode, eph.crs, eph.deltan, eph.m0),
     (eph.cuc, eph.e, eph.cus, eph.sqrt_a),
@@ -205,7 +206,7 @@ Base.@kwdef struct GalileoEphemeris
     af0::Float64
     af1::Float64
     af2::Float64
-    iodnav::Float64
+    iodnav::Int
     crs::Float64
     deltan::Float64
     m0::Float64
@@ -222,17 +223,17 @@ Base.@kwdef struct GalileoEphemeris
     omega::Float64
     omegadot::Float64
     idot::Float64
-    data_sources::Float64 = 513.0
-    week::Float64
+    data_sources::Int = 513
+    week::Int
     sisa::Float64
-    sv_health::Float64
+    sv_health::Int
     bgd_e5a_e1::Float64
     bgd_e5b_e1::Float64
     transmission_time::Float64
 end
 
 """
-    galileo_data_sources(; inav_e1b = false, fnav_e5a = false, inav_e5b = false) -> Float64
+    galileo_data_sources(; inav_e1b = false, fnav_e5a = false, inav_e5b = false) -> Int
 
 The `data_sources` bit field of a [`GalileoEphemeris`](@ref) (RINEX 3.05
 Table A8), assembled from the navigation messages the record was decoded
@@ -270,15 +271,12 @@ function galileo_data_sources(;
     )
     clock_e5a_e1 = fnav_e5a
     clock_e5b_e1 = inav
-    Float64(
-        inav_e1b << 0 | fnav_e5a << 1 | inav_e5b << 2 | clock_e5a_e1 << 8 |
-        clock_e5b_e1 << 9,
-    )
+    inav_e1b << 0 | fnav_e5a << 1 | inav_e5b << 2 | clock_e5a_e1 << 8 | clock_e5b_e1 << 9
 end
 
 """
     galileo_sv_health(; e1b_dvs = 0, e1b_hs = 0, e5a_dvs = 0, e5a_hs = 0,
-                        e5b_dvs = 0, e5b_hs = 0) -> Float64
+                        e5b_dvs = 0, e5b_hs = 0) -> Int
 
 The `sv_health` bit field of a [`GalileoEphemeris`](@ref) (RINEX 3.05 Table
 A8), packed from the data validity status (`dvs`, 0 or 1) and health
@@ -300,19 +298,19 @@ function galileo_sv_health(;
         check_health_field(e5a_hs, "e5a_hs", 3) << 4 |
         check_health_field(e5b_dvs, "e5b_dvs", 1) << 6 |
         check_health_field(e5b_hs, "e5b_hs", 3) << 7
-    Float64(bits)
+    bits
 end
 
 check_health_field(value::Integer, name, largest) =
     0 <= value <= largest ? Int(value) :
     throw(ArgumentError("Health field $name is $value, but it holds 0-$largest"))
 
-system(::GalileoEphemeris) = 'E'
+satellite_system(::GalileoEphemeris) = 'E'
 # I/NAV and F/NAV broadcast the same orbit for one IODnav but different
 # clock parameters and group delays, so RINEX 3.05 keeps them as separate
 # records: the message source is part of the record identity.
 dedupe_key(eph::GalileoEphemeris) =
-    (system(eph), eph.prn, eph.iodnav, eph.week, eph.toe, eph.data_sources)
+    (satellite_system(eph), eph.prn, eph.iodnav, eph.week, eph.toe, eph.data_sources)
 orbit_lines(eph::GalileoEphemeris) = (
     (eph.iodnav, eph.crs, eph.deltan, eph.m0),
     (eph.cuc, eph.e, eph.cus, eph.sqrt_a),
@@ -351,7 +349,7 @@ Base.@kwdef struct BeiDouEphemeris
     af0::Float64
     af1::Float64
     af2::Float64
-    aode::Float64
+    aode::Int
     crs::Float64
     deltan::Float64
     m0::Float64
@@ -368,20 +366,20 @@ Base.@kwdef struct BeiDouEphemeris
     omega::Float64
     omegadot::Float64
     idot::Float64
-    week::Float64
+    week::Int
     sv_accuracy::Float64
-    sath1::Float64
+    sath1::Int
     tgd1_b1_b3::Float64
     tgd2_b2_b3::Float64
     transmission_time::Float64
-    aodc::Float64
+    aodc::Int
 end
 
-system(::BeiDouEphemeris) = 'C'
+satellite_system(::BeiDouEphemeris) = 'C'
 # `aode` counts the hours the parameter set has been in use, so it grows
 # while the ephemeris stays the same and cannot identify the record; the
 # reference times do, as BeiDou issues a new `toe` with every new set.
-dedupe_key(eph::BeiDouEphemeris) = (system(eph), eph.prn, eph.toc, eph.toe)
+dedupe_key(eph::BeiDouEphemeris) = (satellite_system(eph), eph.prn, eph.toc, eph.toe)
 # Broadcast orbit line 5 holds a spare between IDOT and the week, written
 # blank as section 6.4 asks and the example of Table A15 shows; the spares
 # trailing the week and the age of the clock data end their line and are
@@ -517,7 +515,9 @@ function add_orbit_values!(
     line_number::Int,
     values,
 )
-    for (i, value) in enumerate(values)
+    # Counters and bit fields are integers, written as the floats of every
+    # other field of the record.
+    for (i, value) in enumerate(map(orbit_value, values))
         # A spare the record has to keep a place for, because a value of the
         # line follows it. Section 6.4 asks for spares to be left blank, so
         # that a future version assigning them a meaning cannot be read out
@@ -531,6 +531,9 @@ function add_orbit_values!(
         add_field!(record, FMT_E19_12, value)
     end
 end
+
+orbit_value(::Nothing) = nothing
+orbit_value(value::Real) = Float64(value)
 
 # Line 0 is the clock polynomial at the end of the record epoch line.
 @noinline function ephemeris_field_error(system, prn, line_number, i, value)
@@ -578,7 +581,7 @@ ephemeris this rejects leaves the file as it was.
 `eph` may be of any type implementing the ephemeris interface, so a
 constellation this package does not know yet can be written by defining
 
-  - `RINEXParser.system(eph)`: the RINEX satellite system character,
+  - `RINEXParser.satellite_system(eph)`: the RINEX satellite system character,
   - `RINEXParser.dedupe_key(eph)`: a tuple identifying the record, see
     [`RinexNavWriter`](@ref),
   - `RINEXParser.orbit_lines(eph)`: one tuple of at most four values per
@@ -594,17 +597,17 @@ in the constellation's RINEX time system) fields.
 function write_ephemeris!(writer::RinexNavWriter, eph)
     pinned = writer.header.satellite_system
     isnothing(pinned) ||
-        pinned == system(eph) ||
+        pinned == satellite_system(eph) ||
         throw(
             ArgumentError(
-                "Satellite $(satellite_id(system(eph), eph.prn)) does not belong to " *
+                "Satellite $(satellite_id(satellite_system(eph), eph.prn)) does not belong to " *
                 "system '$pinned' of the single-system header; leave the header's " *
                 "satellite_system as nothing to write a mixed navigation file",
             ),
         )
     key = dedupe_key(eph)
     key in writer.written && return false
-    sys = system(eph)
+    sys = satellite_system(eph)
     prn = eph.prn
     t = eph.toc
     # The record epoch holds whole seconds (`I2`).

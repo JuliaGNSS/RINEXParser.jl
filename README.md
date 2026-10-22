@@ -32,7 +32,7 @@ header = RinexObsHeader(;
     receiver_type = "GNSSReceiver.jl",
     antenna_type = "UNKNOWN",
     approx_position = (4141446.0, 604023.0, 4796597.6),  # ECEF, meters
-    obs_types = ['G' => ["C1C", "L1C", "D1C", "S1C"]],
+    obs_codes = ['G' => ["C1C", "L1C", "D1C", "S1C"]],
     signal_strength_unit = "DBHZ",                       # unit of the S observations
     interval = 1.0,
     clock_offset_applied = false,  # epochs, code and phase still carry the clock
@@ -78,13 +78,13 @@ phase_shifts = [
 ]
 ```
 
-Observations are addressed by observation descriptor, in any order and
+Observations are addressed by observation code, in any order and
 without mentioning the types a satellite has no measurement for; `SatObs`
 takes the alignment from the header (passed directly or through the writer)
 and cannot misalign them. A value is a plain number, an `ObsValue` carrying
 the loss-of-lock and signal-strength indicators, or `nothing`. The
 positional form `SatObs('G', 2, [ObsValue(...), nothing, ...])`, aligned
-with the header's `obs_types` for the system, also remains available.
+with the header's `obs_codes` for the system, also remains available.
 
 `loss_of_lock_indicator` sets the bits of the loss-of-lock indicator by name
 - `loss_of_lock`, `half_cycle` for a phase whose polarity is not resolved
@@ -93,9 +93,9 @@ dB-Hz to the 1-9 indicator by the formula of section 6.7.2. The
 loss-of-lock indicator belongs to carrier phases, so a non-zero one on a
 pseudorange, Doppler or signal strength is rejected.
 
-The observation descriptors of `obs_types` and `phase_shifts` are checked
+The observation codes of `obs_codes` and `phase_shifts` are checked
 against the codes RINEX 3.05 defines for each constellation (Tables 14-20),
-so a descriptor that is not a known tracking mode - BDS B1I as `C1I` rather
+so a code that is not a known tracking mode - BDS B1I as `C1I` rather
 than `C2I`, a pseudorange of the codeless GPS tracking - is rejected when
 the writer is created.
 
@@ -184,7 +184,7 @@ a reader apart:
 leap_seconds = LeapSeconds(4; future_count = 4, week = 730, day = 0, time_system = "BDT")
 ```
 
-A navigation file containing several constellations is marked `M: MIXED`
+A navigation file containing several constellations is marked `M: Mixed`
 automatically; set `satellite_system = 'G'` in `RinexNavHeader` for a
 single-system file, which then rejects ephemerides of other
 constellations.
@@ -205,7 +205,7 @@ finite is rejected instead of writing `NaN` into a numeric field.
 
 `write_ephemeris!` accepts any ephemeris type, so a constellation that is
 not modelled yet can be written by implementing the ephemeris interface -
-`RINEXParser.system`, `RINEXParser.dedupe_key`, `RINEXParser.orbit_lines`
+`RINEXParser.satellite_system`, `RINEXParser.dedupe_key`, `RINEXParser.orbit_lines`
 and optionally `RINEXParser.clock_coefficients`, see
 `?write_ephemeris!`. Records must also expose `prn` and `toc` fields. See the
 [ephemeris interface](docs/src/ephemeris_interface.md) for the full contract.
@@ -232,7 +232,7 @@ to be the nine-character site identification `XXXXMRCCC`), the data type
 data frequency (from its `interval`, which a navigation file name does not
 carry). The fields it does not determine are keywords: `period`,
 `data_source`, `compression`, or any site field a marker name does not
-provide. `system` and `kind` are not among them - the data type follows the
+provide. `system` and `file_type` are not among them - the data type follows the
 file, so a header names its own, and passing one is an error rather than a
 keyword the header quietly overrules.
 

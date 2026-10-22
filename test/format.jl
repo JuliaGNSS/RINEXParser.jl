@@ -8,7 +8,7 @@
     # of them reaches the RINEX VERSION / TYPE record.
     @test_throws ArgumentError RinexObsWriter(
         IOBuffer(),
-        RinexObsHeader(obs_types = ['G' => ["C1C"], 'X' => ["C1C"]]),
+        RinexObsHeader(obs_codes = ['G' => ["C1C"], 'X' => ["C1C"]]),
     )
     # A header replaced with an invalid one must not leak the file handle.
     path = tempname()
@@ -24,7 +24,7 @@ end
     # writer could not hold left a fragment of it in the file - and the next
     # record was appended behind the fragment, where nothing tells the two
     # apart.
-    header = RinexObsHeader(obs_types = ['G' => ["C1C", "L1C"]])
+    header = RinexObsHeader(obs_codes = ['G' => ["C1C", "L1C"]])
     io = IOBuffer()
     writer = RinexObsWriter(io, header)
     good =
@@ -71,7 +71,7 @@ end
     # A rejected epoch does not write the header either, so a writer that
     # never saw a valid record still produces a header-only file.
     io = IOBuffer()
-    RinexObsWriter(io, RinexObsHeader(obs_types = ['G' => ["C1C"]])) do w
+    RinexObsWriter(io, RinexObsHeader(obs_codes = ['G' => ["C1C"]])) do w
         @test_throws ArgumentError write_epoch!(
             w,
             ObsEpoch(DateTime(2020, 1, 1), [SatObs('G', 1, [ObsValue(1e14)])]),
@@ -88,22 +88,22 @@ end
     # surface from the lazy header write inside `close`.
     @test_throws ArgumentError RinexObsWriter(
         IOBuffer(),
-        RinexObsHeader(obs_types = types, receiver_number = "X"^21),
+        RinexObsHeader(obs_codes = types, receiver_number = "X"^21),
     )
     @test_throws ArgumentError RinexObsWriter(
         IOBuffer(),
-        RinexObsHeader(obs_types = types, marker_name = "X"^61),
+        RinexObsHeader(obs_codes = types, marker_name = "X"^61),
     )
     @test_throws ArgumentError RinexObsWriter(
         IOBuffer(),
-        RinexObsHeader(obs_types = types, agency = "X"^41),
+        RinexObsHeader(obs_codes = types, agency = "X"^41),
     )
     @test_throws ArgumentError RinexNavWriter(IOBuffer(), RinexNavHeader(program = "X"^21))
     # The widest value each field holds is still written.
     lines = written_lines(
         RinexObsWriter,
         RinexObsHeader(
-            obs_types = types,
+            obs_codes = types,
             marker_name = "X"^60,
             receiver_number = "R"^20,
             receiver_type = "T"^20,
@@ -122,13 +122,13 @@ end
     # writer was created: a 21-column receiver number would otherwise reach
     # the file and push the receiver type one column out of its own.
     io = IOBuffer()
-    writer = RinexObsWriter(io, RinexObsHeader(obs_types = ['G' => ["C1C"]]))
+    writer = RinexObsWriter(io, RinexObsHeader(obs_codes = ['G' => ["C1C"]]))
     writer.header.receiver_number = "R"^21
     epoch = ObsEpoch(DateTime(2020, 1, 1), [SatObs('G', 1, [ObsValue(1.0)])])
     @test_throws ArgumentError write_epoch!(writer, epoch)
     # And on the path that writes the header from `close`.
     io = IOBuffer()
-    writer = RinexObsWriter(io, RinexObsHeader(obs_types = ['G' => ["C1C"]]))
+    writer = RinexObsWriter(io, RinexObsHeader(obs_codes = ['G' => ["C1C"]]))
     writer.header.marker_name = "X"^61
     @test_throws ArgumentError close(writer)
 

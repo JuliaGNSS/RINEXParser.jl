@@ -21,7 +21,7 @@ const DEFAULT_COUNTRY = "XXX"
 const DATA_SOURCES =
     ('R' => "from receiver data", 'S' => "from a data stream", 'U' => "unknown")
 
-const FILE_KINDS = ('O' => "observation", 'N' => "navigation", 'M' => "meteorological")
+const FILE_TYPES = ('O' => "observation", 'N' => "navigation", 'M' => "meteorological")
 
 const FILE_FORMATS = ("rnx" => "RINEX", "crx" => "Hatanaka compressed RINEX")
 
@@ -70,7 +70,7 @@ RINEX 3.02 and later:
 The fields are
 
   - `station`, `monument`, `receiver`, `country`: the nine-character site
-    identification `XXXXMRCCC` - the four-character site designation, the
+    identification `XXXXMRCCC` - the four-character station name, the
     monument and receiver number `0-9` at that site, and the ISO 3166-1
     alpha-3 country or region code.
   - `data_source`: `'R'` for a file written from receiver data, `'S'` for one
@@ -88,10 +88,11 @@ The fields are
     frequency (`30S`, `01S`, `05M`, `05Z` for 5 Hz, `01C` for 100 Hz), or
     `nothing` for `00U`. Navigation file names have no such field and require
     `nothing`.
-  - `system`, `kind`: the two-character data type, e.g. `'G'` and `'O'` for
-    `GO` (GPS observation), `'M'` and `'N'` for `MN` (mixed navigation).
-    `system` is a constellation character or `'M'` for a mixed file; `kind`
-    is `'O'`, `'N'` or `'M'` (meteorological).
+  - `system`, `file_type`: the two characters of the data type, e.g. `'G'`
+    and `'O'` for `GO` (GPS observation), `'M'` and `'N'` for `MN` (mixed
+    navigation). `system` is a constellation character or `'M'` for a mixed
+    file; `file_type` is `'O'`, `'N'` or `'M'` (meteorological), the file
+    type of the `RINEX VERSION / TYPE` record.
   - `format`: `"rnx"` for RINEX, `"crx"` for Hatanaka compressed RINEX.
   - `compression`: `"gz"`, `"bz2"`, `"zip"`, or `nothing` for a file that is
     not compressed.
@@ -119,7 +120,7 @@ struct RinexFileName
     period::Union{Nothing,Dates.Period}
     interval::Union{Nothing,Float64}
     system::Char
-    kind::Char
+    file_type::Char
     format::String
     compression::Union{Nothing,String}
 
@@ -135,14 +136,14 @@ struct RinexFileName
         period,
         interval,
         system,
-        kind,
+        file_type,
         format,
         compression,
     )
-        file_kind = check_file_kind(kind)
+        file_type = check_file_type(file_type)
         # The field is absent from a navigation file name, so an interval
         # given for one would be dropped without a trace of it in the name.
-        (file_kind != 'N' || isnothing(interval)) || throw(
+        (file_type != 'N' || isnothing(interval)) || throw(
             ArgumentError(
                 "A navigation file name has no data-frequency field, so it cannot " *
                 "carry the sampling interval $interval; pass interval = nothing",
@@ -163,9 +164,9 @@ struct RinexFileName
             floor(check_start_time(start_time), Minute),
             field_period(period),
             field_interval(seconds),
-            check_file_system(system, file_kind),
-            file_kind,
-            check_format(format, file_kind),
+            check_file_system(system, file_type),
+            file_type,
+            check_format(format, file_type),
             check_compression(compression),
         )
     end
@@ -181,7 +182,7 @@ RinexFileName(;
     period = nothing,
     interval = nothing,
     system = 'M',
-    kind = 'O',
+    file_type = 'O',
     format = "rnx",
     compression = nothing,
 ) = RinexFileName(
@@ -194,7 +195,7 @@ RinexFileName(;
     period,
     interval,
     system,
-    kind,
+    file_type,
     format,
     compression,
 )
@@ -235,7 +236,7 @@ function check_station(station)
     name = uppercase(String(station))
     (length(name) == 4 && all(is_name_character, name)) || throw(
         ArgumentError(
-            "A station is the four letters and digits of a RINEX site designation, " *
+            "A station name is four letters and digits, as in the IGS station names, " *
             "not \"$station\"; the RinexFileName(header, ...) forms derive one from " *
             "a marker name",
         ),
@@ -306,19 +307,21 @@ check_interval(interval) = throw(
     ),
 )
 
-function check_file_kind(kind::AbstractChar)
-    file_kind = uppercase(Char(kind))
-    any(first(pair) == file_kind for pair in FILE_KINDS) || throw(
-        ArgumentError("A file kind is $(describe_options(FILE_KINDS)) data, not '$kind'"),
+function check_file_type(file_type::AbstractChar)
+    file_type = uppercase(Char(file_type))
+    any(first(pair) == file_type for pair in FILE_TYPES) || throw(
+        ArgumentError(
+            "A file type is $(describe_options(FILE_TYPES)) data, not '$file_type'",
+        ),
     )
-    file_kind
+    file_type
 end
 
-function check_file_system(system::AbstractChar, kind::Char)
+function check_file_system(system::AbstractChar, file_type::Char)
     file_system = uppercase(Char(system))
     # The data type of a meteorological file is MM: it carries no
     # constellation of its own.
-    kind == 'M' &&
+    file_type == 'M' &&
         file_system != 'M' &&
         throw(
             ArgumentError(
@@ -330,7 +333,7 @@ function check_file_system(system::AbstractChar, kind::Char)
     file_system
 end
 
-function check_format(format, kind::Char)
+function check_format(format, file_type::Char)
     file_format = lowercase(String(format))
     any(first(pair) == file_format for pair in FILE_FORMATS) || throw(
         ArgumentError(
@@ -340,11 +343,11 @@ function check_format(format, kind::Char)
     # Hatanaka compression differences observations of the same type and
     # satellite, so it applies to observation data only.
     file_format == "crx" &&
-        kind != 'O' &&
+        file_type != 'O' &&
         throw(
             ArgumentError(
                 "\"crx\" is Hatanaka compressed observation data, so it cannot name " *
-                "a $(kind_description(kind)) file",
+                "a $(file_type_description(file_type)) file",
             ),
         )
     file_format
@@ -365,8 +368,8 @@ end
 describe_options(options) =
     join(("'$key' ($description)" for (key, description) in options), ", ", " or ")
 
-kind_description(kind::Char) =
-    last(FILE_KINDS[findfirst(p -> first(p) == kind, FILE_KINDS)])
+file_type_description(file_type::Char) =
+    last(FILE_TYPES[findfirst(p -> first(p) == file_type, FILE_TYPES)])
 
 """
     field_period(period) -> Union{Nothing,Dates.Period}
@@ -554,8 +557,8 @@ function Base.print(io::IO, name::RinexFileName)
     ]
     # Mandatory for observation and meteorological data, not used by
     # navigation files.
-    name.kind == 'N' || push!(fields, frequency_field(name.interval))
-    push!(fields, string(name.system, name.kind))
+    name.file_type == 'N' || push!(fields, frequency_field(name.interval))
+    push!(fields, string(name.system, name.file_type))
     print(io, join(fields, '_'), '.', name.format)
     isnothing(name.compression) || print(io, '.', name.compression)
     nothing
@@ -613,7 +616,7 @@ function Base.parse(::Type{RinexFileName}, name::AbstractString)
         period = parse_period(parse(Int, fields[10]), only(uppercase(fields[11]))),
         interval = parse_frequency(fields[12], fields[13], only(fields[15])),
         system = only(fields[14]),
-        kind = only(fields[15]),
+        file_type = only(fields[15]),
         format = fields[16],
         compression = fields[17],
     )
@@ -623,11 +626,11 @@ end
 # name says that its data frequency is not specified. A name that leaves the
 # field out instead is not one this convention writes, and reading it would
 # come back as a different name - the one with `00U` in it.
-function parse_frequency(count, unit, kind::Char)
+function parse_frequency(count, unit, file_type::Char)
     if isnothing(count)
-        uppercase(kind) == 'N' || throw(
+        uppercase(file_type) == 'N' || throw(
             ArgumentError(
-                "A file name of the data type '$kind' carries a data-frequency " *
+                "A file name of the file type '$file_type' carries a data-frequency " *
                 "field; a frequency that is not specified is written as \"00U\", " *
                 "not left out",
             ),
@@ -703,19 +706,19 @@ function parse_interval(count::Int, unit::Char)
 end
 
 """
-    check_data_type_keywords(keywords, description, source, kind)
+    check_data_type_keywords(keywords, description, source, file_type)
 
-Reject `system` and `kind` where a header determines them. The data type of a
+Reject `system` and `file_type` where a header determines them. The data type of a
 name follows from the file, and a keyword the header overrules afterwards
 would be dropped without a trace of it in the name - the same reason a
 navigation file name rejects an interval instead of ignoring it.
 """
-function check_data_type_keywords(keywords, description, source, kind::Char)
-    for keyword in (:system, :kind)
+function check_data_type_keywords(keywords, description, source, file_type::Char)
+    for keyword in (:system, :file_type)
         haskey(keywords, keyword) && throw(
             ArgumentError(
                 "The data type of $description file name follows from its header, " *
-                "where the system is $source and the kind is '$kind', so $keyword " *
+                "where the system is $source and the file type is '$file_type', so $keyword " *
                 "cannot be given as a keyword: the name follows the file, not the " *
                 "other way round",
             ),
@@ -747,14 +750,14 @@ end
 
 The name of the observation file `header` describes. The site fields come
 from the header's marker name (see [`site_fields`](@ref)), the data type
-from the constellations of its `obs_types` - a single one names its
+from the constellations of its `obs_codes` - a single one names its
 constellation, several name a mixed file - and the data frequency from its
 `interval`. `start_time` defaults to the header's `time_of_first_obs`, which
 a lazily written header may not carry yet.
 
 Any of the fields the header does not determine can be given as a keyword,
 as can `marker_name` to derive the site from a name other than the header's;
-`system` and `kind` are the header's own and are rejected as keywords rather
+`system` and `file_type` are the header's own and are rejected as keywords rather
 than dropped:
 
     rinex_filename(header, start_time; country = "DEU", period = Day(1))
@@ -768,7 +771,7 @@ function RinexFileName(
     check_data_type_keywords(
         keywords,
         "an observation",
-        "the constellations of its obs_types",
+        "the constellations of its obs_codes",
         'O',
     )
     isnothing(start_time) && throw(
@@ -787,8 +790,8 @@ function RinexFileName(
         start_time,
         interval = header.interval,
         keywords...,
-        system = system_character(first.(header.obs_types)),
-        kind = 'O',
+        system = system_character(first.(header.obs_codes)),
+        file_type = 'O',
     )
 end
 
@@ -805,7 +808,7 @@ the site:
 
     rinex_filename(nav_header, start_time; marker_name = obs_header.marker_name)
 
-`system` and `kind` are the header's own here too: a navigation file of one
+`system` and `file_type` are the header's own here too: a navigation file of one
 constellation is named by pinning the header's `satellite_system`, not by
 naming the file something the file is not.
 """
@@ -831,6 +834,6 @@ function RinexFileName(
         start_time,
         keywords...,
         system = something(header.satellite_system, 'M'),
-        kind = 'N',
+        file_type = 'N',
     )
 end

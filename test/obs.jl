@@ -4,7 +4,7 @@
         receiver_type = "GNSSReceiver.jl",
         antenna_type = "UNKNOWN",
         approx_position = (4141446.0044, 604023.0011, 4796597.5545),
-        obs_types = ['G' => ["C1C", "L1C", "D1C", "S1C"]],
+        obs_codes = ['G' => ["C1C", "L1C", "D1C", "S1C"]],
         interval = 1.0,
         clock_offset_applied = false,
         leap_seconds = 18,
@@ -107,7 +107,7 @@
             "D5Q",
             "S5Q",
         ]
-        wide = RinexObsHeader(obs_types = ['G' => many])
+        wide = RinexObsHeader(obs_codes = ['G' => many])
         lines = written_lines(w -> nothing, RinexObsWriter, wide)
         type_lines = filter(l -> label(l) == "SYS / # / OBS TYPES", lines)
         @test length(type_lines) == 2
@@ -122,8 +122,8 @@
         @test_throws ArgumentError write_epoch!(writer, bad)
     end
 
-    @testset "observations addressed by observation type" begin
-        # The same satellite record as above, built from descriptors in an
+    @testset "observations addressed by observation code" begin
+        # The same satellite record as above, built from codes in an
         # order of its own instead of the header's.
         same(a::SatObs, b::SatObs) =
             a.system == b.system && a.prn == b.prn && a.observations == b.observations
@@ -139,7 +139,7 @@
         )
         @test same(by_code, first(epoch.satellites))
 
-        # Observation types the header declares but the call does not
+        # Observation codes the header declares but the call does not
         # mention stay blank, and so does an explicit `nothing`. Any
         # iterable of pairs works, which is what a receiver collects when
         # the available observables vary per satellite.
@@ -169,7 +169,7 @@
     end
 
     @testset "the header can be completed until it is written" begin
-        lazy = RinexObsHeader(obs_types = ['G' => ["C1C"]])
+        lazy = RinexObsHeader(obs_codes = ['G' => ["C1C"]])
         lines = written_lines(RinexObsWriter, lazy) do writer
             writer.header.approx_position = (4141446.0044, 604023.0011, 4796597.5545)
             writer.header.leap_seconds = 18
@@ -183,11 +183,11 @@
     end
 
     @testset "the time system follows the constellation" begin
-        function time_system(obs_types)
+        function time_system(obs_codes)
             lines = written_lines(
                 w -> write_epoch!(w, ObsEpoch(DateTime(2020, 1, 1), SatObs[])),
                 RinexObsWriter,
-                RinexObsHeader(; obs_types),
+                RinexObsHeader(; obs_codes),
             )
             record = only(filter(l -> label(l) == "TIME OF FIRST OBS", lines))
             last(split(content(record)))
@@ -210,7 +210,7 @@
                     ),
                 ),
                 RinexObsWriter,
-                RinexObsHeader(obs_types = ['G' => ["C1C"]]),
+                RinexObsHeader(obs_codes = ['G' => ["C1C"]]),
             ),
         )[2]
 
@@ -232,7 +232,7 @@
         @test_throws ArgumentError ObsValue(1.0; ssi = -1)
         # The seconds of the epoch record are a fixed field like any other.
         seconds(fractional_second) = write_epoch!(
-            RinexObsWriter(IOBuffer(), RinexObsHeader(obs_types = ['G' => ["C1C"]])),
+            RinexObsWriter(IOBuffer(), RinexObsHeader(obs_codes = ['G' => ["C1C"]])),
             ObsEpoch(DateTime(2020, 1, 1), SatObs[]; fractional_second),
         )
         @test isnothing(seconds(1.0e-5))
@@ -241,7 +241,7 @@
         offset(value) = write_epoch!(
             RinexObsWriter(
                 IOBuffer(),
-                RinexObsHeader(obs_types = ['G' => ["C1C"]], clock_offset_applied = false),
+                RinexObsHeader(obs_codes = ['G' => ["C1C"]], clock_offset_applied = false),
             ),
             ObsEpoch(DateTime(2020, 1, 1), SatObs[]; clock_offset = value),
         )
@@ -249,14 +249,14 @@
         @test_throws ArgumentError offset(100.0)
         # And so does the two-column satellite number.
         @test_throws ArgumentError write_epoch!(
-            RinexObsWriter(IOBuffer(), RinexObsHeader(obs_types = ['G' => ["C1C"]])),
+            RinexObsWriter(IOBuffer(), RinexObsHeader(obs_codes = ['G' => ["C1C"]])),
             ObsEpoch(DateTime(2020, 1, 1), [SatObs('G', 100, [ObsValue(1.0)])]),
         )
     end
 
     @testset "epochs are written without allocating per field" begin
         many = RinexObsHeader(
-            obs_types = ['G' => ["C1C", "L1C", "D1C", "S1C", "C5Q", "L5Q", "D5Q", "S5Q"]],
+            obs_codes = ['G' => ["C1C", "L1C", "D1C", "S1C", "C5Q", "L5Q", "D5Q", "S5Q"]],
             clock_offset_applied = false,
         )
         sats = [
@@ -264,7 +264,7 @@
                 many,
                 'G',
                 prn,
-                (code => 2.1e7 + prn for code in last(many.obs_types[1]))...,
+                (code => 2.1e7 + prn for code in last(many.obs_codes[1]))...,
             ) for prn = 1:30
         ]
         epoch = ObsEpoch(DateTime(2020, 1, 1), sats; clock_offset = -1.2e-4)
@@ -305,7 +305,7 @@ end
 @testset "the time of the first observation reaches the header" begin
     # Taken from the first epoch, it is assigned to the header, so that the
     # file can be named from the header once it has been written.
-    header = RinexObsHeader(obs_types = ['G' => ["C1C"]], interval = 30.0)
+    header = RinexObsHeader(obs_codes = ['G' => ["C1C"]], interval = 30.0)
     epoch = ObsEpoch(
         DateTime(2020, 6, 8, 10, 0, 0),
         [SatObs('G', 1, [ObsValue(1.0)])];
@@ -325,7 +325,7 @@ end
 
     # A time the header was given has no fractional part of its own.
     given = RinexObsHeader(
-        obs_types = ['G' => ["C1C"]],
+        obs_codes = ['G' => ["C1C"]],
         time_of_first_obs = DateTime(2020, 6, 8, 10, 0, 0),
     )
     lines = written_lines(RinexObsWriter, given) do writer
@@ -340,7 +340,7 @@ end
     # pick one: a correction, a zero for data that arrived aligned, or a
     # blank for the reference signal of the band.
     header = RinexObsHeader(
-        obs_types = ['G' => ["C1C", "L1C", "L2S", "L2W"], 'E' => ["L1C", "L8Q"]],
+        obs_codes = ['G' => ["C1C", "L1C", "L2S", "L2W"], 'E' => ["L1C", "L8Q"]],
         phase_shifts = [
             PhaseShift('G', "L2S", -0.25),
             PhaseShift('G', "L2W", 0.0),
@@ -365,7 +365,7 @@ end
     # More than ten satellites continue on further records, indented past
     # the fields they repeat.
     many = RinexObsHeader(
-        obs_types = ['G' => ["L2S"]],
+        obs_codes = ['G' => ["L2S"]],
         phase_shifts = [PhaseShift('G', "L2S", -0.25; satellites = 1:12)],
     )
     lines = written_lines(RinexObsWriter, many) do writer
@@ -380,7 +380,7 @@ end
     @test_throws ArgumentError RinexObsWriter(
         IOBuffer(),
         RinexObsHeader(
-            obs_types = ['G' => ["L1C"]],
+            obs_codes = ['G' => ["L1C"]],
             phase_shifts = [PhaseShift('G', "L2S", -0.25)],
         ),
     )
@@ -393,7 +393,7 @@ end
     # One code carries one record per group of satellites it corrects, so
     # every entry has to be written, not just the first one found.
     header = RinexObsHeader(
-        obs_types = ['G' => ["L2S"]],
+        obs_codes = ['G' => ["L2S"]],
         phase_shifts = [
             PhaseShift('G', "L2S", -0.25; satellites = [1, 2]),
             PhaseShift('G', "L2S", 0.0; satellites = [3]),
@@ -406,7 +406,7 @@ end
 
     # A satellite cannot be told two corrections for one carrier phase.
     overlapping = RinexObsHeader(
-        obs_types = ['G' => ["L2S"]],
+        obs_codes = ['G' => ["L2S"]],
         phase_shifts = [
             PhaseShift('G', "L2S", -0.25; satellites = [1, 2]),
             PhaseShift('G', "L2S", 0.0; satellites = [2, 3]),
@@ -417,13 +417,13 @@ end
     @test_throws ArgumentError RinexObsWriter(
         IOBuffer(),
         RinexObsHeader(
-            obs_types = ['G' => ["L2S"]],
+            obs_codes = ['G' => ["L2S"]],
             phase_shifts = [PhaseShift('G', "L2S", -0.25), PhaseShift('G', "L2S", 0.0)],
         ),
     )
     # Two codes of the same system keep their own records.
     fine = RinexObsHeader(
-        obs_types = ['G' => ["L2S", "L2W"]],
+        obs_codes = ['G' => ["L2S", "L2W"]],
         phase_shifts = [PhaseShift('G', "L2S", -0.25), PhaseShift('G', "L2W", 0.0)],
     )
     @test RinexObsWriter(IOBuffer(), fine) isa RinexObsWriter
@@ -440,7 +440,7 @@ end
     # `push!` after the constructor checked it; the header writer checks it
     # again rather than letting a number past its columns reach the file.
     shift = PhaseShift('G', "L2S", -0.25; satellites = [1])
-    header = RinexObsHeader(obs_types = ['G' => ["L2S"]], phase_shifts = [shift])
+    header = RinexObsHeader(obs_codes = ['G' => ["L2S"]], phase_shifts = [shift])
     io = IOBuffer()
     writer = RinexObsWriter(io, header)
     push!(shift.satellites, 100)
@@ -450,7 +450,7 @@ end
     grown = PhaseShift('G', "L2S", -0.25; satellites = [1])
     writer = RinexObsWriter(
         IOBuffer(),
-        RinexObsHeader(obs_types = ['G' => ["L2S"]], phase_shifts = [grown]),
+        RinexObsHeader(obs_codes = ['G' => ["L2S"]], phase_shifts = [grown]),
     )
     append!(grown.satellites, 2:100)
     @test_throws ArgumentError close(writer)
@@ -479,7 +479,7 @@ end
 end
 
 @testset "the loss-of-lock indicator belongs to the carrier phase" begin
-    header = RinexObsHeader(obs_types = ['G' => ["C1C", "L1C", "D1C", "S1C"]])
+    header = RinexObsHeader(obs_codes = ['G' => ["C1C", "L1C", "D1C", "S1C"]])
     write_with(code, lli) = write_epoch!(
         RinexObsWriter(IOBuffer(), header),
         ObsEpoch(
@@ -544,7 +544,7 @@ end
 
 @testset "the optional signal strength and clock records" begin
     header = RinexObsHeader(
-        obs_types = ['G' => ["C1C", "S1C"]],
+        obs_codes = ['G' => ["C1C", "S1C"]],
         signal_strength_unit = "DBHZ",
         interval = 1.0,
         clock_offset_applied = true,
@@ -566,7 +566,7 @@ end
     @test content(header_lines[13]) == "     1"
     @test all(length(l) <= 80 for l in header_lines)
 
-    not_applied = RinexObsHeader(obs_types = ['G' => ["C1C"]], clock_offset_applied = false)
+    not_applied = RinexObsHeader(obs_codes = ['G' => ["C1C"]], clock_offset_applied = false)
     lines = written_lines(w -> nothing, RinexObsWriter, not_applied)
     @test content(only(filter(l -> label(l) == "RCV CLOCK OFFS APPL", lines))) == "     0"
 
@@ -574,14 +574,14 @@ end
     lines = written_lines(
         w -> nothing,
         RinexObsWriter,
-        RinexObsHeader(obs_types = ['G' => ["C1C"]]),
+        RinexObsHeader(obs_codes = ['G' => ["C1C"]]),
     )
     @test !any(l -> label(l) in ("SIGNAL STRENGTH UNIT", "RCV CLOCK OFFS APPL"), lines)
 
     # The unit is an A20 field.
     @test_throws ArgumentError RinexObsWriter(
         IOBuffer(),
-        RinexObsHeader(obs_types = ['G' => ["S1C"]], signal_strength_unit = "D"^21),
+        RinexObsHeader(obs_codes = ['G' => ["S1C"]], signal_strength_unit = "D"^21),
     )
 end
 
@@ -589,11 +589,11 @@ end
     accepts(system, codes...) =
         RinexObsWriter(
             IOBuffer(),
-            RinexObsHeader(obs_types = [system => collect(codes)]),
+            RinexObsHeader(obs_codes = [system => collect(codes)]),
         ) isa RinexObsWriter
     rejects(system, code) =
         try
-            RinexObsWriter(IOBuffer(), RinexObsHeader(obs_types = [system => [code]]))
+            RinexObsWriter(IOBuffer(), RinexObsHeader(obs_codes = [system => [code]]))
             false
         catch error
             error isa ArgumentError
@@ -643,13 +643,13 @@ end
     @test_throws ArgumentError PhaseShift('C', "L1I", 0.0)
     @test PhaseShift('C', "L2I", 0.0).code == "L2I"
     # And so does a header completed after the writer was created.
-    writer = RinexObsWriter(IOBuffer(), RinexObsHeader(obs_types = ['G' => ["C1C"]]))
-    push!(last(writer.header.obs_types[1]), "C1I")
+    writer = RinexObsWriter(IOBuffer(), RinexObsHeader(obs_codes = ['G' => ["C1C"]]))
+    push!(last(writer.header.obs_codes[1]), "C1I")
     @test_throws ArgumentError close(writer)
 end
 
 @testset "the seconds of an epoch stay below 60" begin
-    header() = RinexObsHeader(obs_types = ['G' => ["C1C"]])
+    header() = RinexObsHeader(obs_codes = ['G' => ["C1C"]])
     function epoch_line(time, fractional_second)
         lines = written_lines(RinexObsWriter, header()) do writer
             write_epoch!(writer, ObsEpoch(time, SatObs[]; fractional_second))
@@ -700,36 +700,36 @@ end
 @testset "a system and a code are declared once" begin
     @test_throws ArgumentError RinexObsWriter(
         IOBuffer(),
-        RinexObsHeader(obs_types = ['G' => ["C1C"], 'G' => ["L1C"]]),
+        RinexObsHeader(obs_codes = ['G' => ["C1C"], 'G' => ["L1C"]]),
     )
     @test_throws ArgumentError RinexObsWriter(
         IOBuffer(),
-        RinexObsHeader(obs_types = ['G' => ["C1C", "L1C", "C1C"]]),
+        RinexObsHeader(obs_codes = ['G' => ["C1C", "L1C", "C1C"]]),
     )
     @test RinexObsWriter(
         IOBuffer(),
-        RinexObsHeader(obs_types = ['G' => ["C1C"], 'E' => ["C1C"]]),
+        RinexObsHeader(obs_codes = ['G' => ["C1C"], 'E' => ["C1C"]]),
     ) isa RinexObsWriter
 end
 
 @testset "a clock offset needs the RCV CLOCK OFFS APPL record" begin
     epoch = ObsEpoch(DateTime(2020, 1, 1), SatObs[]; clock_offset = -1.0e-4)
     io = IOBuffer()
-    writer = RinexObsWriter(io, RinexObsHeader(obs_types = ['G' => ["C1C"]]))
+    writer = RinexObsWriter(io, RinexObsHeader(obs_codes = ['G' => ["C1C"]]))
     write_epoch!(writer, ObsEpoch(DateTime(2020, 1, 1), SatObs[]))
     written = position(io)
     @test_throws ArgumentError write_epoch!(writer, epoch)
     @test position(io) == written
     for applied in (false, true)
         header =
-            RinexObsHeader(obs_types = ['G' => ["C1C"]], clock_offset_applied = applied)
+            RinexObsHeader(obs_codes = ['G' => ["C1C"]], clock_offset_applied = applied)
         @test isnothing(write_epoch!(RinexObsWriter(IOBuffer(), header), epoch))
     end
 end
 
 @testset "GLONASS slots and code-phase biases" begin
     header = RinexObsHeader(
-        obs_types = ['R' => ["C1C", "L1C"]],
+        obs_codes = ['R' => ["C1C", "L1C"]],
         glonass_slots = [
             prn => channel for
             (prn, channel) in zip(1:10, [1, -4, 5, 6, 1, -4, 5, 6, -2, -7])
@@ -751,7 +751,7 @@ end
     lines = written_lines(
         w -> nothing,
         RinexObsWriter,
-        RinexObsHeader(obs_types = ['G' => ["C1C"]]),
+        RinexObsHeader(obs_codes = ['G' => ["C1C"]]),
     )
     @test content(only(filter(l -> label(l) == "GLONASS SLOT / FRQ #", lines))) == "  0"
     @test content(only(filter(l -> label(l) == "GLONASS COD/PHS/BIS", lines))) == ""
@@ -762,7 +762,7 @@ end
     # And the list keeps to its fields.
     slots(list) = RinexObsWriter(
         IOBuffer(),
-        RinexObsHeader(obs_types = ['R' => ["C1C"]], glonass_slots = list),
+        RinexObsHeader(obs_codes = ['R' => ["C1C"]], glonass_slots = list),
     )
     @test slots([1 => -7, 2 => 6]) isa RinexObsWriter
     @test_throws ArgumentError slots([1 => 7])
@@ -772,7 +772,7 @@ end
     @test_throws ArgumentError RinexObsWriter(
         IOBuffer(),
         RinexObsHeader(
-            obs_types = ['R' => ["C1C"]],
+            obs_codes = ['R' => ["C1C"]],
             glonass_code_phase_biases = (1.0e5, 0.0, 0.0, 0.0),
         ),
     )
