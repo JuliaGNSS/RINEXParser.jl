@@ -277,7 +277,11 @@ number:
   - `boc_tracking` (bit 2): an MBOC-modulated signal was tracked as BOC,
     which may make it noisier.
 
-The indicator is defined for carrier phase observations only.
+The indicator is defined for carrier phase observations only - all of it,
+the BOC bit included: section 6.7.1 opens with "For phase observations
+only", and Table A3 associates the LLI with the phase observation alone. So
+[`write_epoch!`](@ref) rejects a non-zero one on any other observation type,
+and a BOC-tracked signal sets `boc_tracking` on its `L` observation.
 
     ObsValue(phase; lli = loss_of_lock_indicator(half_cycle = !polarity_known))
 """
@@ -664,9 +668,21 @@ add_indicator!(record::RecordBuffer, indicator::Int) =
 # available - `nothing`, or a value that is not finite - leaves the whole
 # field blank, which is what RINEX reads as "no observation"; a finite value
 # too large for its columns is an error rather than a shifted record.
+#
+# The loss-of-lock indicator is defined for carrier phases only (section
+# 6.7.1), so a lost lock flagged on a pseudorange, a Doppler or a signal
+# strength is an error rather than a flag no reader looks for there; a zero
+# is "OK or not known" and stays valid on any of them.
 add_observation!(record::RecordBuffer, ::Nothing, sat::SatObs, code) =
     add_blanks!(record, 16)
 function add_observation!(record::RecordBuffer, obs::ObsValue, sat::SatObs, code)
+    (something(obs.lli, 0) == 0 || first(code) == 'L') || throw(
+        ArgumentError(
+            "Observation $code of satellite $(satellite_id(sat.system, sat.prn)) " *
+            "carries the loss-of-lock indicator $(obs.lli), but the indicator is " *
+            "defined for carrier phase observations only",
+        ),
+    )
     isfinite(obs.value) || return add_blanks!(record, 16)
     fits_fixed_field(obs.value, 3, 14) || fixed_field_error(
         "Observation $code of satellite $(satellite_id(sat.system, sat.prn))",
