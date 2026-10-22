@@ -447,10 +447,20 @@ leap_seconds_content(leap_seconds::LeapSeconds) =
     leap_seconds.time_system
 
 """
-    epoch_seconds(time, fractional_second) -> Float64
+    epoch_minute_seconds(time, fractional_second) -> (DateTime, Float64)
 
-Seconds within the minute of a record epoch, including sub-millisecond
-`fractional_second` that `DateTime` cannot carry.
+The minute of a record epoch and the seconds within it, including the
+sub-millisecond `fractional_second` that `DateTime` cannot carry. The
+seconds are rounded to the seven decimals their field holds first, so that
+an epoch a fraction short of the next minute is written as that minute
+rather than as second 60, and one a fraction before its own as the minute
+before.
 """
-epoch_seconds(time::DateTime, fractional_second) =
-    second(time) + millisecond(time) / 1000 + fractional_second
+function epoch_minute_seconds(time::DateTime, fractional_second)
+    start = floor(time, Minute)
+    seconds = round(second(time) + millisecond(time) / 1000 + fractional_second; digits = 7)
+    seconds >= 60 && return start + Minute(1), seconds - 60
+    seconds < 0 && return start - Minute(1), seconds + 60
+    # Adding zero turns a `-0.0` into the `0.0` it is written as.
+    start, seconds + 0.0
+end
