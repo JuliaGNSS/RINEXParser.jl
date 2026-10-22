@@ -3,7 +3,13 @@
 
 Ionospheric correction header record, e.g. Klobuchar parameters as
 `IonosphericCorrection("GPSA", (α0, α1, α2, α3))` and
-`IonosphericCorrection("GPSB", (β0, β1, β2, β3))`.
+`IonosphericCorrection("GPSB", (β0, β1, β2, β3))`. `type` is one of the
+correction types of RINEX 3.05 Table A5: `"GAL"`, `"GPSA"`, `"GPSB"`,
+`"QZSA"`, `"QZSB"`, `"BDSA"`, `"BDSB"`, `"IRNA"` or `"IRNB"`.
+
+Galileo's NeQuick record carries three coefficients, `(ai0, ai1, ai2)`, and
+its fourth field is a spare written blank. A fourth value of zero, passed
+for that spare, is accepted and dropped.
 
 `time_mark` and `sv_id` say when the parameters were transmitted and by
 which satellite. The mark is the hour of the day of the transmission time as
@@ -14,11 +20,18 @@ a day, whose readers need to tell them apart - and optional elsewhere, so a
 """
 struct IonosphericCorrection
     type::String
-    parameters::NTuple{4,Float64}
+    parameters::Union{NTuple{3,Float64},NTuple{4,Float64}}
     time_mark::Union{Nothing,Char}
     sv_id::Union{Nothing,Int}
     function IonosphericCorrection(type, parameters, time_mark, sv_id)
         type = String(type)
+        type in IONOSPHERIC_CORRECTION_TYPES || throw(
+            ArgumentError(
+                "\"$type\" is not an ionospheric correction type; RINEX 3.05 " *
+                "defines $(join(IONOSPHERIC_CORRECTION_TYPES, ", "))",
+            ),
+        )
+        parameters = ionospheric_parameters(type, Tuple(parameters))
         if !isnothing(time_mark)
             time_mark in 'A':'X' || throw(
                 ArgumentError(
@@ -45,8 +58,32 @@ struct IonosphericCorrection
                 ),
             )
         end
-        new(type, NTuple{4,Float64}(parameters), time_mark, sv_id)
+        new(type, parameters, time_mark, sv_id)
     end
+end
+
+const IONOSPHERIC_CORRECTION_TYPES =
+    ("GAL", "GPSA", "GPSB", "QZSA", "QZSB", "BDSA", "BDSB", "IRNA", "IRNB")
+
+function ionospheric_parameters(type, parameters::Tuple)
+    if type == "GAL"
+        (length(parameters) == 4 && iszero(last(parameters))) &&
+            return NTuple{3,Float64}(parameters[1:3])
+        length(parameters) == 3 || throw(
+            ArgumentError(
+                "A GAL ionospheric correction carries the three coefficients " *
+                "ai0, ai1 and ai2, not $(length(parameters)) values",
+            ),
+        )
+        return NTuple{3,Float64}(parameters)
+    end
+    length(parameters) == 4 || throw(
+        ArgumentError(
+            "A $type ionospheric correction carries four parameters, not " *
+            "$(length(parameters))",
+        ),
+    )
+    NTuple{4,Float64}(parameters)
 end
 IonosphericCorrection(type, parameters; time_mark = nothing, sv_id = nothing) =
     IonosphericCorrection(type, parameters, time_mark, sv_id)
@@ -442,6 +479,8 @@ function write_nav_header(writer::RinexNavWriter)
             rpad(corr.type, 4) *
             " " *
             join(Printf.format(FMT_E12_4, p) for p in corr.parameters) *
+            # The spare fourth field of a GAL record.
+            " "^(12 * (4 - length(corr.parameters))) *
             # `1X,A1` and `1X,I2`, both blank where the record does not carry
             # them - which only a BDS record cannot be.
             (isnothing(corr.time_mark) ? " "^2 : " " * corr.time_mark) *
