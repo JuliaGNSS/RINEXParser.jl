@@ -143,9 +143,6 @@ struct PhaseShift
             ),
         )
         check_observation_code(system, code)
-        # Converted before it is measured against its columns, so that the
-        # `Real` the constructor takes reaches the check as the `Float64` it
-        # is written as.
         correction = Float64(correction)
         fits_fixed_field(correction, 5, 8) ||
             fixed_field_error("Phase shift of $system $code", correction, 5, 8)
@@ -552,13 +549,7 @@ function check_obs_header(header::RinexObsHeader)
         # - and an empty list already claims all of them.
         for other in view(header.phase_shifts, 1:(i-1))
             (other.system == shift.system && other.code == shift.code) || continue
-            overlap =
-                isempty(shift.satellites) || isempty(other.satellites) ?
-                "every satellite of the system" :
-                let shared = intersect(shift.satellites, other.satellites)
-                    isempty(shared) ? "" :
-                    join(map(prn -> satellite_id(shift.system, prn), sort(shared)), ", ")
-                end
+            overlap = shared_satellites(shift, other)
             isempty(overlap) || throw(
                 ArgumentError(
                     "Two phase shifts of $(shift.system) $(shift.code) apply to " *
@@ -571,6 +562,15 @@ function check_obs_header(header::RinexObsHeader)
     nothing
 end
 
+# The satellites two phase shifts of one code both apply to, as text for the
+# error that rejects them; an empty list means every satellite.
+function shared_satellites(a::PhaseShift, b::PhaseShift)
+    (isempty(a.satellites) || isempty(b.satellites)) &&
+        return "every satellite of the system"
+    shared = sort(intersect(a.satellites, b.satellites))
+    join(map(prn -> satellite_id(a.system, prn), shared), ", ")
+end
+
 function Base.close(writer::RinexObsWriter)
     try
         # An empty file still gets its header, so it is valid RINEX.
@@ -581,10 +581,7 @@ function Base.close(writer::RinexObsWriter)
     nothing
 end
 
-SatObs(writer::RinexObsWriter, system::Char, prn::Integer, observations::Pair...) =
-    SatObs(writer.header, system, prn, observations)
-SatObs(writer::RinexObsWriter, system::Char, prn::Integer, observations) =
-    SatObs(writer.header, system, prn, observations)
+SatObs(writer::RinexObsWriter, args...) = SatObs(writer.header, args...)
 
 function obs_types_for(header::RinexObsHeader, system::Char)
     index = findfirst(p -> first(p) == system, header.obs_types)
@@ -782,11 +779,8 @@ written yet. The whole epoch is checked before its first line is written, so
 an epoch this rejects leaves the file as it was.
 """
 function write_epoch!(writer::RinexObsWriter, epoch::ObsEpoch)
-    # The epoch line and every satellite line are assembled in the buffer,
-    # and a value a field cannot hold throws while they are: nothing has
-    # reached the file at that point, so a rejected epoch leaves it as it
-    # was. Writing the lines as they were formatted used to leave a fragment
-    # behind that the epochs following it could not be told apart from.
+    # Assembled whole before it is written, so a rejected epoch leaves the
+    # file as it was.
     record = start_record!(writer.record)
     t, seconds = epoch_minute_seconds(epoch.time, epoch.fractional_second)
     add_char!(record, '>')

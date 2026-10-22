@@ -146,13 +146,6 @@ function flush_record!(io::IO, record::RecordBuffer)
 end
 
 """
-    end_record!(io, record)
-
-Write the assembled record to `io` as one line and reset the buffer.
-"""
-end_record!(io::IO, record::RecordBuffer) = (end_line!(record); flush_record!(io, record))
-
-"""
     header_line(io, content, label)
 
 Write one RINEX header record: `content` padded to 60 columns followed by
