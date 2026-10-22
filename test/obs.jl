@@ -107,7 +107,10 @@
             "D5Q",
             "S5Q",
         ]
-        wide = RinexObsHeader(obs_codes = ['G' => many])
+        wide = RinexObsHeader(
+            obs_codes = ['G' => many],
+            phase_shifts = aligned_phase_shifts(['G' => many]),
+        )
         lines = written_lines(w -> nothing, RinexObsWriter, wide)
         type_lines = filter(l -> label(l) == "SYS / # / OBS TYPES", lines)
         @test length(type_lines) == 2
@@ -255,8 +258,10 @@
     end
 
     @testset "epochs are written without allocating per field" begin
+        obs_codes = ['G' => ["C1C", "L1C", "D1C", "S1C", "C5Q", "L5Q", "D5Q", "S5Q"]]
         many = RinexObsHeader(
-            obs_codes = ['G' => ["C1C", "L1C", "D1C", "S1C", "C5Q", "L5Q", "D5Q", "S5Q"]],
+            obs_codes = obs_codes,
+            phase_shifts = aligned_phase_shifts(obs_codes),
             clock_offset_applied = false,
         )
         sats = [
@@ -340,7 +345,7 @@ end
     # pick one: a correction, a zero for data that arrived aligned, or a
     # blank for the reference signal of the band.
     header = RinexObsHeader(
-        obs_codes = ['G' => ["C1C", "L1C", "L2S", "L2W"], 'E' => ["L1C", "L8Q"]],
+        obs_codes = ['G' => ["C1C", "L1C", "L2S", "L2W"], 'E' => ["L1B", "L8Q"]],
         phase_shifts = [
             PhaseShift('G', "L2S", -0.25),
             PhaseShift('G', "L2W", 0.0),
@@ -354,7 +359,7 @@ end
         "G L1C",
         "G L2S -0.25000",
         "G L2W  0.00000",
-        "E L1C",
+        "E L1B",
         "E L8Q -0.25000  02 E03 E05",
     ]
     # The correction lands in the columns the format gives it, F8.5 after
@@ -384,9 +389,115 @@ end
             phase_shifts = [PhaseShift('G', "L2S", -0.25)],
         ),
     )
+    # The reference signal of a band is not shifted against itself; zero
+    # says it arrived aligned, which it always does.
+    @test_throws ArgumentError PhaseShift('G', "L1C", 0.25)
+    @test_throws ArgumentError PhaseShift('C', "L1S", -0.5; satellites = [19])
+    @test PhaseShift('E', "L1B", 0.0).correction == 0.0
+    @test PhaseShift('G', "L2W", 0.0).correction == 0.0
     # The record corrects a carrier phase, not a pseudorange.
     @test_throws ArgumentError PhaseShift('G', "C1C", 0.0)
     @test_throws ArgumentError PhaseShift('X', "L1C", 0.0)
+end
+
+@testset "a phase code is written blank only if it needed no correction" begin
+    # Galileo L1C is aligned to L1B by +1/2 cycle, so a blank record would
+    # claim a reference signal it is not.
+    @test_throws ArgumentError RinexObsWriter(
+        IOBuffer(),
+        RinexObsHeader(obs_codes = ['E' => ["C1C", "L1C"]]),
+    )
+    stated = RinexObsHeader(
+        obs_codes = ['E' => ["C1C", "L1C"]],
+        phase_shifts = [PhaseShift('E', "L1C", phase_correction('E', "L1C"))],
+    )
+    lines = written_lines(RinexObsWriter, stated) do writer
+    end
+    @test content.(filter(l -> label(l) == "SYS / PHASE SHIFT", lines)) ==
+          ["E L1C  0.50000"]
+    # A code the table only requires aligned needs a shift all the same.
+    @test_throws ArgumentError RinexObsWriter(
+        IOBuffer(),
+        RinexObsHeader(obs_codes = ['E' => ["C1X", "L1X"]]),
+    )
+    # A shift for some of the satellites states the code too: section 5.2.12
+    # names the satellites a correction affects, and the others had none.
+    partial = RinexObsHeader(
+        obs_codes = ['G' => ["L2S"]],
+        phase_shifts = [PhaseShift('G', "L2S", -0.25; satellites = [1])],
+    )
+    @test RinexObsWriter(IOBuffer(), partial) isa RinexObsWriter
+    # The reference signals, the codes the table aligns with no correction
+    # ("None", as GPS L2W in the example header of the spec), and the codes
+    # the table states no alignment for keep their blank record.
+    blank = RinexObsHeader(
+        obs_codes = [
+            'G' => ["L1C", "L2P", "L2W", "L2D", "L5I", "L1Y"],
+            'R' => ["L4B", "L6X"],
+            'J' => ["L2L", "L6E"],
+            'C' => ["L2I", "L1D", "L1S", "L7D"],
+            'S' => ["L1C", "L5Q"],
+        ],
+    )
+    lines = written_lines(RinexObsWriter, blank) do writer
+    end
+    @test all(
+        l -> length(content(l)) == 5,
+        filter(l -> label(l) == "SYS / PHASE SHIFT", lines),
+    )
+    # And a code added after the writer was created is caught on the header
+    # write.
+    writer = RinexObsWriter(IOBuffer(), RinexObsHeader(obs_codes = ['G' => ["L1C"]]))
+    push!(last(writer.header.obs_codes[1]), "L5Q")
+    @test_throws ArgumentError close(writer)
+end
+
+@testset "Table A23 gives the reference and the correction of a phase" begin
+    @test RINEXParser.reference_code('G', "L2S") == "L2P"
+    @test phase_correction('G', "L2S") === -0.25
+    @test RINEXParser.reference_code('E', "L1C") == "L1B"
+    @test phase_correction('E', "L1C") === 0.5
+    @test phase_correction('E', "L6C") === -0.5
+    @test RINEXParser.reference_code('E', "L1B") == "L1B"
+    @test phase_correction('E', "L1B") === 0.0
+    # "None" is a correction of zero to a signal that is not the reference.
+    @test RINEXParser.reference_code('G', "L2W") == "L2P"
+    @test phase_correction('G', "L2W") === 0.0
+    # A band can hold several references: BDS B1C and B1A share band 1,
+    # and B2 and B2b share band 7.
+    @test RINEXParser.reference_code('C', "L1P") == "L1D"
+    @test RINEXParser.reference_code('C', "L1L") == "L1S"
+    @test RINEXParser.reference_code('C', "L7Q") == "L7I"
+    @test RINEXParser.reference_code('C', "L7Z") == "L7D"
+    # A phase that must be aligned without a number, or whose correction
+    # depends on the satellite, has no correction to give.
+    @test isnothing(phase_correction('G', "L5X"))
+    @test isnothing(phase_correction('G', "L2C"))
+    @test isnothing(phase_correction('J', "L1S"))
+    @test RINEXParser.reference_code('G', "L2C") == "L2P"
+    # The quadrature components of BDS B1 and B3 and of GLONASS G3 are among
+    # them, unlike the -1/4 of BDS B2 L7Q.
+    for (system, code) in [('C', "L2Q"), ('C', "L6Q"), ('R', "L3Q")]
+        @test isnothing(phase_correction(system, code))
+    end
+    @test phase_correction('C', "L7Q") === -0.25
+    # And codes the table leaves out have neither.
+    for (system, code) in [('S', "L1C"), ('G', "L1Y"), ('E', "L1A"), ('J', "L1Z")]
+        @test isnothing(RINEXParser.reference_code(system, code))
+        @test isnothing(phase_correction(system, code))
+    end
+    @test_throws ArgumentError RINEXParser.reference_code('G', "C1C")
+    @test_throws ArgumentError RINEXParser.reference_code('C', "L1I")
+    @test_throws ArgumentError phase_correction('X', "L1C")
+
+    # Every entry is a carrier phase of Tables 14-20, in one group only,
+    # and each group leads with its reference.
+    for (system, groups) in RINEXParser.PHASE_ALIGNMENT_GROUPS
+        codes = [first(entry) for group in groups for entry in group]
+        @test allunique(codes)
+        @test all(code -> RINEXParser.check_carrier_phase_code(system, code) == code, codes)
+        @test all(group -> last(first(group)) === 0.0, groups)
+    end
 end
 
 @testset "a phase shift that does not reach every satellite" begin
@@ -586,14 +697,26 @@ end
 end
 
 @testset "observation codes follow RINEX 3.05 Tables 14-20" begin
-    accepts(system, codes...) =
-        RinexObsWriter(
-            IOBuffer(),
-            RinexObsHeader(obs_codes = [system => collect(codes)]),
-        ) isa RinexObsWriter
+    function accepts(system, codes...)
+        obs_codes = [system => collect(codes)]
+        header = RinexObsHeader(
+            obs_codes = obs_codes,
+            phase_shifts = aligned_phase_shifts(obs_codes),
+        )
+        RinexObsWriter(IOBuffer(), header) isa RinexObsWriter
+    end
+    # The header states a shift for a carrier phase as `accepts` does, so a
+    # rejection comes from the code and not from a missing PhaseShift.
     rejects(system, code) =
         try
-            RinexObsWriter(IOBuffer(), RinexObsHeader(obs_codes = [system => [code]]))
+            obs_codes = [system => [code]]
+            RinexObsWriter(
+                IOBuffer(),
+                RinexObsHeader(
+                    obs_codes = obs_codes,
+                    phase_shifts = aligned_phase_shifts(obs_codes),
+                ),
+            )
             false
         catch error
             error isa ArgumentError

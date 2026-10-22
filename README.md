@@ -68,15 +68,24 @@ end
 Carrier phases must reach a RINEX 3 file aligned with the reference signal
 of their band (section 5.2.12), and the mandatory `SYS / PHASE SHIFT`
 records say how. A phase code the header does not name in `phase_shifts` is
-written as the reference signal of its band, which needed no correction;
-name the others:
+written as one that needed no correction, as the reference signal of its
+band does. The codes Table A23 gives another correction have to be named,
+and a header that leaves one out is rejected when the writer is created:
 
 ```julia
 phase_shifts = [
     PhaseShift('G', "L2S", -0.25),  # the correction that was applied
-    PhaseShift('G', "L2W", 0.0),    # arrived aligned, nothing applied here
+    PhaseShift('G', "L5Q", 0.0),    # arrived aligned, nothing applied here
 ]
 ```
+
+`phase_correction` looks a phase code up in Table A23 and gives the
+correction the ICDs define for aligning it with the reference signal of its
+band: `phase_correction('E', "L1C") == 0.5`. Where the table only says that a
+code must be aligned (GPS `L5X`, ...), or where the correction depends on
+the satellite (GPS `L2C`), `phase_correction` returns `nothing`. Such a
+code still needs a `PhaseShift`, with the correction the receiver or
+converter applied.
 
 Observations are addressed by observation code, in any order and
 without mentioning the types a satellite has no measurement for; `SatObs`

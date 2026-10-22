@@ -105,6 +105,155 @@ function check_observation_code(system::Char, code::AbstractString)
     code
 end
 
+# Return the observation code `code` if it is a carrier phase of `system`,
+# which is what a phase shift and the alignment of Table A23 are given for.
+function check_carrier_phase_code(system::Char, code::AbstractString)
+    startswith(code, "L") || throw(
+        ArgumentError(
+            "A phase shift corrects a carrier phase, so \"$code\" is not a code " *
+            "it can be given for; carrier phase codes start with \"L\"",
+        ),
+    )
+    check_observation_code(system, code)
+end
+
+# RINEX 3.05 Table A23: per system, the groups of carrier phases aligned to
+# one reference signal, the reference first, each with the correction in
+# cycles the table gives for the phase as the satellite issues it. "None" is
+# a correction of zero; `nothing` is a phase the table says must be aligned
+# to the reference without saying by how much, or whose correction depends
+# on the satellite (GPS L2C on its block, QZSS L1S on Block I against II).
+# A band can hold more than one group, as BDS B1C and B1A share band 1. The
+# codes the table states no alignment for are left out: all of SBAS, the
+# GPS Y and M and Galileo A and Z signals, QZSS L1B, the QZSS L1Z it marks
+# N/A and the restricted NavIC L5B and L9B.
+const PHASE_ALIGNMENT_GROUPS = Dict(
+    'G' => (
+        (
+            "L1C" => 0.0,
+            "L1S" => 0.25,
+            "L1L" => 0.25,
+            "L1X" => 0.25,
+            "L1P" => 0.25,
+            "L1W" => 0.25,
+            "L1N" => 0.25,
+        ),
+        (
+            "L2P" => 0.0,
+            "L2C" => nothing,
+            "L2D" => 0.0,
+            "L2S" => -0.25,
+            "L2L" => -0.25,
+            "L2X" => -0.25,
+            "L2W" => 0.0,
+            "L2N" => 0.0,
+        ),
+        ("L5I" => 0.0, "L5Q" => -0.25, "L5X" => nothing),
+    ),
+    'R' => (
+        ("L1C" => 0.0, "L1P" => 0.25),
+        ("L4A" => 0.0, "L4B" => 0.0, "L4X" => 0.0),
+        ("L2C" => 0.0, "L2P" => 0.25),
+        ("L6A" => 0.0, "L6B" => 0.0, "L6X" => 0.0),
+        ("L3I" => 0.0, "L3Q" => nothing, "L3X" => nothing),
+    ),
+    'E' => (
+        ("L1B" => 0.0, "L1C" => 0.5, "L1X" => nothing),
+        ("L5I" => 0.0, "L5Q" => -0.25, "L5X" => nothing),
+        ("L7I" => 0.0, "L7Q" => -0.25, "L7X" => nothing),
+        ("L8I" => 0.0, "L8Q" => -0.25, "L8X" => nothing),
+        ("L6B" => 0.0, "L6C" => -0.5, "L6X" => nothing),
+    ),
+    'J' => (
+        ("L1C" => 0.0, "L1S" => nothing, "L1L" => 0.25, "L1X" => 0.25),
+        ("L2S" => 0.0, "L2L" => 0.0, "L2X" => 0.0),
+        ("L5I" => 0.0, "L5Q" => -0.25, "L5X" => nothing),
+        ("L5D" => 0.0, "L5P" => -0.25, "L5Z" => nothing),
+        ("L6S" => 0.0, "L6L" => 0.0, "L6X" => 0.0, "L6E" => 0.0, "L6Z" => 0.0),
+    ),
+    'C' => (
+        ("L2I" => 0.0, "L2Q" => nothing, "L2X" => nothing),
+        ("L1D" => 0.0, "L1P" => nothing, "L1X" => nothing),
+        ("L1S" => 0.0, "L1L" => nothing, "L1Z" => nothing),
+        ("L5D" => 0.0, "L5P" => nothing, "L5X" => nothing),
+        ("L7I" => 0.0, "L7Q" => -0.25, "L7X" => nothing),
+        ("L7D" => 0.0, "L7P" => nothing, "L7Z" => nothing),
+        ("L8D" => 0.0, "L8P" => nothing, "L8X" => nothing),
+        ("L6I" => 0.0, "L6Q" => nothing, "L6X" => nothing),
+        ("L6D" => 0.0, "L6P" => nothing, "L6Z" => nothing),
+    ),
+    'I' => (
+        ("L5A" => 0.0, "L5C" => 0.0, "L5X" => nothing),
+        ("L9A" => 0.0, "L9C" => 0.0, "L9X" => nothing),
+    ),
+)
+
+# The groups above keyed by `(system, code)`, each code with the reference
+# of its group and its correction.
+const PHASE_ALIGNMENT = Dict{Tuple{Char,String},Tuple{String,Union{Nothing,Float64}}}(
+    (system, code) => (first(first(group)), correction) for
+    (system, groups) in PHASE_ALIGNMENT_GROUPS for group in groups for
+    (code, correction) in group
+)
+
+# The reference and correction of the carrier phase `code` of `system`, or
+# `nothing` for a code the table leaves out.
+function phase_alignment_entry(system::Char, code::AbstractString)
+    check_satellite_system(system)
+    check_carrier_phase_code(system, code)
+    get(PHASE_ALIGNMENT, (system, String(code)), nothing)
+end
+
+"""
+    reference_code(system, code) -> Union{String,Nothing}
+
+The reference signal that RINEX 3.05 Table A23 gives the band of the
+carrier phase `code` of `system`. This is the signal the phase is aligned
+to: `"L2P"` for GPS `L2S`, `"L1B"` for Galileo `L1C`, and `code` itself for
+a reference signal. One band can hold more than one group of signals, each
+with a reference of its own. BDS B1C and B1A share band 1 with the
+references `L1D` and `L1S`.
+
+`nothing` is a code the table states no alignment for. These are all of
+SBAS, the restricted GPS Y and M and Galileo A and Z signals, QZSS `L1B`
+and `L1Z`, and NavIC `L5B` and `L9B`.
+"""
+function reference_code(system::Char, code::AbstractString)
+    found = phase_alignment_entry(system, code)
+    isnothing(found) ? nothing : first(found)
+end
+
+"""
+    phase_correction(system, code) -> Union{Float64,Nothing}
+
+The correction in cycles that RINEX 3.05 Table A23 gives for the carrier
+phase `code` of `system`, as the satellite issues it, to align it with the
+reference signal of its band: `-0.25` for GPS `L2S`, `0.5` for Galileo `L1C`.
+The sign follows section 5.2.12, φ_RINEX = φ_original + Δφ.
+
+A receiver that issues its phases unaligned adds this to them and states it
+as the correction of the code's [`PhaseShift`](@ref). One whose phases
+arrive aligned states `0.0` instead. The correction is zero for the
+reference itself and for the signals the table gives no shift ("None").
+
+`nothing` is a code the table gives no number for. Some it says "must be
+aligned" to their reference without saying by how much (GPS `L5X`, the
+pilots of BDS-3, ...). Others depend on the satellite: GPS `L2C` on its
+block, and QZSS `L1S` on Block I against Block II. It is also `nothing` for
+the codes the table states no alignment for: all of SBAS, the restricted
+GPS Y and M and Galileo A and Z signals, QZSS `L1B` and `L1Z`, and NavIC
+`L5B` and `L9B`.
+
+A header owes a code a [`PhaseShift`](@ref) unless its correction is `0.0`,
+which includes the reference itself, or the table states no alignment for
+it. Every other code needs one, whether `phase_correction` gives its number
+or `nothing`.
+"""
+function phase_correction(system::Char, code::AbstractString)
+    found = phase_alignment_entry(system, code)
+    isnothing(found) ? nothing : last(found)
+end
+
 """
     PhaseShift(system, code, correction; satellites = Int[])
 
@@ -121,13 +270,31 @@ one a file makes is a statement about its data:
     of the receiver and this is what was added to align it,
   - **zero** says the phase arrived aligned - from the receiver or from a
     stream such as RTCM-MSM - and nothing was applied,
-  - a **blank** correction says the code is the reference signal of its band
-    and needs none. This is what a code no `PhaseShift` names is written as.
+  - a **blank** correction says the code needed none: it is the reference
+    signal of its band, or a code Table A23 aligns to it with "None". This
+    is what a code no `PhaseShift` names is written as.
 
-The default is therefore a claim that every carrier phase in the file is a
-reference signal. A file carrying a non-reference code (GPS `L2S`, Galileo
-`L8Q`, ...) has to say which of the first two applies to it, or a reader
-cannot reconstruct what the receiver measured.
+The default is therefore a claim that no carrier phase in the file needed a
+correction. That holds for the reference signals and for the codes Table
+A23 aligns without one (GPS `L2W`, ...). A file carrying any other code (GPS
+`L2S`, Galileo `L1C`, ...) has to say which of the first two applies to it,
+or a reader cannot reconstruct what the receiver measured. So the writer
+rejects a header that has no shift for a code whose
+[`phase_correction`](@ref) is not zero. That function gives the correction
+the ICDs define for the code:
+
+    PhaseShift('E', "L1C", phase_correction('E', "L1C"))  # +0.5 was applied
+
+Where [`phase_correction`](@ref) is `nothing`, the table still requires the
+phase aligned but gives no correction that holds for every receiver or
+satellite, so the shift states the one the receiver or converter applied.
+
+A reference signal takes no correction other than zero, as nothing aligns
+it, and a shift naming one with any other is rejected.
+
+A shift limited to `satellites` names its code too. Section 5.2.12 lists
+the satellites a correction affects, so the others of the system read as
+having had nothing applied, as with zero.
 """
 struct PhaseShift
     system::Char
@@ -136,16 +303,20 @@ struct PhaseShift
     satellites::Vector{Int}
     function PhaseShift(system, code, correction, satellites)
         check_satellite_system(system)
-        startswith(code, "L") || throw(
-            ArgumentError(
-                "A phase shift corrects a carrier phase, so \"$code\" is not a code " *
-                "it can be given for; carrier phase codes start with \"L\"",
-            ),
-        )
-        check_observation_code(system, code)
+        check_carrier_phase_code(system, code)
         correction = Float64(correction)
         fits_fixed_field(correction, 5, 8) ||
             fixed_field_error("Phase shift of $system $code", correction, 5, 8)
+        # The reference is what the other phases of its band are aligned to,
+        # so it cannot have been shifted against itself.
+        found = get(PHASE_ALIGNMENT, (system, String(code)), nothing)
+        (iszero(correction) || isnothing(found) || first(found) != code) || throw(
+            ArgumentError(
+                "$system $code is the reference signal of its band in RINEX 3.05 " *
+                "Table A23, which section 5.2.12 leaves uncorrected, so its phase " *
+                "shift cannot be $correction cycles",
+            ),
+        )
         new(
             system,
             String(code),
@@ -171,8 +342,9 @@ to keep the system order deterministic:
 
 `phase_shifts` carries the [`PhaseShift`](@ref) records of the carrier
 phases that were corrected to align them with the reference signal of their
-band; a phase code no entry names is written as a reference signal that
-needed none.
+band. A phase code no entry names is written as one that needed none, so
+every phase code that RINEX 3.05 Table A23 gives a correction other than
+"None" needs an entry.
 
 `signal_strength_unit` is the unit of the `S` observations, written to the
 optional `SIGNAL STRENGTH UNIT` record; `"DBHZ"` is the one RINEX 3.05
@@ -559,6 +731,32 @@ function check_obs_header(header::RinexObsHeader)
             )
         end
     end
+    # A phase code no shift names is written blank, which says it needed no
+    # correction. A shift for some of the satellites names it as well, see
+    # `PhaseShift`.
+    for (system, codes) in header.obs_codes, code in codes
+        # Only the carrier phases Table A23 gives "None" or states no
+        # alignment for can be written blank.
+        found = get(PHASE_ALIGNMENT, (system, code), nothing)
+        isnothing(found) && continue
+        reference, correction = found
+        (!isnothing(correction) && iszero(correction)) && continue
+        any(s -> s.system == system && s.code == code, header.phase_shifts) && continue
+        alignment =
+            isnothing(correction) ?
+            "requires it aligned to $reference, without a correction that holds " *
+            "for every receiver or satellite" :
+            "aligns it to $reference with a correction of $correction cycles"
+        throw(
+            ArgumentError(
+                "$(SYSTEM_NAMES[system]) carrier phase $code needs a PhaseShift: " *
+                "without one its SYS / PHASE SHIFT record is blank, which says it " *
+                "needed no correction, but RINEX 3.05 Table A23 $alignment. State " *
+                "the correction that was applied to align it, or 0.0 if it arrived " *
+                "aligned",
+            ),
+        )
+    end
     nothing
 end
 
@@ -661,8 +859,8 @@ function write_obs_header(writer::RinexObsWriter, first_epoch_time, first_epoch_
         header_line(io, lpad(Int(header.clock_offset_applied), 6), "RCV CLOCK OFFS APPL")
     end
     # One record per carrier phase, which the format makes mandatory: the
-    # correction that aligned it, or a blank saying it is the reference
-    # signal of its band. See `PhaseShift` for what each of them claims.
+    # correction that aligned it, or a blank saying it needed none. See
+    # `PhaseShift` for what each of them claims.
     for (system, codes) in header.obs_codes, code in codes
         startswith(code, "L") || continue
         stated = false
