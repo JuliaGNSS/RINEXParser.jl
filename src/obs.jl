@@ -476,9 +476,25 @@ end
 # Checked when the writer is created, so a header the records cannot hold
 # does not surface from the lazy header write inside `close`.
 function check_obs_header(header::RinexObsHeader)
-    for (system, codes) in header.obs_types
+    # Data lines are matched to the first list of their system, so a second
+    # list of a system, or a second entry of a code, would describe columns
+    # no data line has.
+    for (i, (system, codes)) in enumerate(header.obs_types)
         check_satellite_system(system)
-        foreach(code -> check_observation_code(system, code), codes)
+        any(p -> first(p) == system, view(header.obs_types, 1:(i-1))) && throw(
+            ArgumentError(
+                "The header lists observation types for system '$system' twice; " *
+                "give all of them in one list",
+            ),
+        )
+        for (j, code) in enumerate(codes)
+            check_observation_code(system, code)
+            code in view(codes, 1:(j-1)) && throw(
+                ArgumentError(
+                    "Observation type \"$code\" is declared twice for system '$system'",
+                ),
+            )
+        end
     end
     check_header_field(header.program, 20, "The program of the header")
     check_header_field(header.run_by, 20, "The agency running the program")

@@ -689,3 +689,18 @@ end
     @test content(only(filter(l -> label(l) == "TIME OF FIRST OBS", lines))) ==
           "  2020     1     1     0     1    0.0000000     GPS"
 end
+
+@testset "a system and a code are declared once" begin
+    @test_throws ArgumentError RinexObsWriter(
+        IOBuffer(),
+        RinexObsHeader(obs_types = ['G' => ["C1C"], 'G' => ["L1C"]]),
+    )
+    @test_throws ArgumentError RinexObsWriter(
+        IOBuffer(),
+        RinexObsHeader(obs_types = ['G' => ["C1C", "L1C", "C1C"]]),
+    )
+    @test RinexObsWriter(
+        IOBuffer(),
+        RinexObsHeader(obs_types = ['G' => ["C1C"], 'E' => ["C1C"]]),
+    ) isa RinexObsWriter
+end
