@@ -471,6 +471,46 @@ end
     @test ObsValue(1.0; lli = loss_of_lock_indicator(half_cycle = true)).lli == 2
 end
 
+@testset "the loss-of-lock indicator belongs to the carrier phase" begin
+    header = RinexObsHeader(obs_types = ['G' => ["C1C", "L1C", "D1C", "S1C"]])
+    write_with(code, lli) = write_epoch!(
+        RinexObsWriter(IOBuffer(), header),
+        ObsEpoch(
+            DateTime(2020, 1, 1),
+            [SatObs(header, 'G', 1, code => ObsValue(1.0; lli))],
+        ),
+    )
+    @test isnothing(write_with("L1C", 1))
+    @test isnothing(write_with("L1C", 7))
+    # Zero is "OK or not known", which any observation may say.
+    for code in ("C1C", "D1C", "S1C")
+        @test isnothing(write_with(code, 0))
+        @test isnothing(write_with(code, nothing))
+        @test_throws ArgumentError write_with(code, 1)
+        @test_throws ArgumentError write_with(
+            code,
+            loss_of_lock_indicator(half_cycle = true),
+        )
+    end
+    # A rejected epoch leaves the file as it was, like any other record.
+    io = IOBuffer()
+    writer = RinexObsWriter(io, header)
+    write_epoch!(writer, ObsEpoch(DateTime(2020, 1, 1), SatObs[]))
+    written = position(io)
+    bad = SatObs(
+        header,
+        'G',
+        1,
+        "L1C" => ObsValue(1.0; lli = 1),
+        "C1C" => ObsValue(1.0; lli = 1),
+    )
+    @test_throws ArgumentError write_epoch!(
+        writer,
+        ObsEpoch(DateTime(2020, 1, 1, 0, 0, 1), [bad]),
+    )
+    @test position(io) == written
+end
+
 @testset "the signal-strength indicator follows Table 23" begin
     # Every band edge of the table, and the values either side of it.
     @test signal_strength_indicator(0.0) == 1

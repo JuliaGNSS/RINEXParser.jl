@@ -89,7 +89,9 @@ with the header's `obs_types` for the system, also remains available.
 `loss_of_lock_indicator` sets the bits of the loss-of-lock indicator by name
 - `loss_of_lock`, `half_cycle` for a phase whose polarity is not resolved
 yet, and `boc_tracking` - and `signal_strength_indicator` maps a C/N0 in
-dB-Hz to the 1-9 indicator by the formula of section 6.7.2.
+dB-Hz to the 1-9 indicator by the formula of section 6.7.2. The
+loss-of-lock indicator belongs to carrier phases, so a non-zero one on a
+pseudorange, Doppler or signal strength is rejected.
 
 The observation descriptors of `obs_types` and `phase_shifts` are checked
 against the codes RINEX 3.05 defines for each constellation (Tables 14-20),
