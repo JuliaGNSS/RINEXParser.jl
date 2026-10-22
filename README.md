@@ -91,6 +91,12 @@ with the header's `obs_types` for the system, also remains available.
 yet, and `boc_tracking` - and `signal_strength_indicator` maps a C/N0 in
 dB-Hz to the 1-9 indicator by the formula of section 6.7.2.
 
+The observation descriptors of `obs_types` and `phase_shifts` are checked
+against the codes RINEX 3.05 defines for each constellation (Tables 14-20),
+so a descriptor that is not a known tracking mode - BDS B1I as `C1I` rather
+than `C2I`, a pseudorange of the codeless GPS tracking - is rejected when
+the writer is created.
+
 `RinexObsHeader` is mutable and the header is written when the first epoch
 arrives, so `time_of_first_obs` is filled in from that epoch - and assigned
 to the header, so `rinex_filename` can name the file from it afterwards -
