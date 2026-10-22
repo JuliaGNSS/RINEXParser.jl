@@ -264,6 +264,13 @@ function check_country(country)
     code
 end
 
+check_data_source(source::AbstractString) =
+    length(source) == 1 ? check_data_source(only(source)) :
+    throw(
+        ArgumentError(
+            "A data source is $(describe_options(DATA_SOURCES)), not \"$source\"",
+        ),
+    )
 function check_data_source(source::AbstractChar)
     data_source = uppercase(Char(source))
     any(first(pair) == data_source for pair in DATA_SOURCES) || throw(
@@ -273,11 +280,7 @@ function check_data_source(source::AbstractChar)
 end
 
 check_start_time(::Nothing) = throw(
-    ArgumentError(
-        "A RINEX filename needs the start time of the file, which is not known here; " *
-        "pass it as RinexFileName(header, start_time), or set the observation " *
-        "header's time_of_first_obs before the name is derived from it",
-    ),
+    ArgumentError("A RINEX filename needs the start time of the file; pass start_time"),
 )
 function check_start_time(time)
     start_time = convert(DateTime, time)
@@ -768,6 +771,13 @@ function RinexFileName(
         "the constellations of its obs_types",
         'O',
     )
+    isnothing(start_time) && throw(
+        ArgumentError(
+            "The observation header has no time_of_first_obs yet, which names the " *
+            "file; pass it as RinexFileName(header, start_time), or derive the name " *
+            "after the first epoch was written",
+        ),
+    )
     station, monument, receiver, country = site_fields(marker_name)
     RinexFileName(;
         station,
@@ -806,6 +816,12 @@ function RinexFileName(
     keywords...,
 )
     check_data_type_keywords(keywords, "a navigation", "its satellite_system", 'N')
+    isnothing(start_time) && throw(
+        ArgumentError(
+            "A navigation header carries no time, so the start time of the file is " *
+            "passed as RinexFileName(header, start_time)",
+        ),
+    )
     station, monument, receiver, country = site_fields(marker_name)
     RinexFileName(;
         station,

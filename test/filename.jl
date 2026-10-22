@@ -168,6 +168,9 @@
         @test_throws ArgumentError name(country = "GERMANY")
         @test_throws ArgumentError name(country = "DE1")
         @test_throws ArgumentError name(data_source = 'X')
+        # A one-letter string is accepted like the other text fields.
+        @test name(data_source = "s").data_source == 'S'
+        @test_throws ArgumentError name(data_source = "RS")
         @test_throws ArgumentError name(system = 'X')
         @test_throws ArgumentError name(kind = 'X')
         @test_throws ArgumentError name(format = "obs")
@@ -384,4 +387,19 @@ end
           "ROOF00DEU_R_20201601000_00U_30S_GO.rnx"
     @test isnothing(tryparse(RinexFileName, "ROOF00DEU_R_20201601000_07U_30S_GO.rnx"))
     @test isnothing(tryparse(RinexFileName, "ROOF00DEU_R_20201601000_01D_05U_GO.rnx"))
+end
+
+@testset "a missing start time names the header that lacks it" begin
+    obs = RinexObsHeader(obs_types = ['G' => ["C1C"]])
+    message(f) =
+        try
+            f()
+            ""
+        catch error
+            sprint(showerror, error)
+        end
+    @test occursin("time_of_first_obs", message(() -> rinex_filename(obs)))
+    nav = message(() -> rinex_filename(RinexNavHeader()))
+    @test occursin("navigation header", nav)
+    @test !occursin("time_of_first_obs", nav)
 end
