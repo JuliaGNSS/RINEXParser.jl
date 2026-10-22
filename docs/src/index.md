@@ -16,7 +16,7 @@ using RINEXParser, Dates
 
 header = RinexObsHeader(;
     marker_name = "ROOF00DEU",
-    obs_types = ['G' => ["C1C", "L1C"]],
+    obs_codes = ['G' => ["C1C", "L1C"]],
     interval = 1.0,
 )
 epoch = ObsEpoch(

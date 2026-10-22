@@ -185,10 +185,10 @@ check_header_field(value::AbstractString, width::Int, description) =
 const SYSTEM_NAMES = Dict(
     'G' => "GPS",
     'R' => "GLONASS",
-    'E' => "GALILEO",
+    'E' => "Galileo",
     'C' => "BDS",
     'J' => "QZSS",
-    'I' => "NavIC",
+    'I' => "NavIC/IRNSS",
     'S' => "SBAS",
 )
 
@@ -224,7 +224,7 @@ from the set of system characters contained in the file.
 """
 function system_identification(systems)
     sys = system_character(systems)
-    sys == 'M' ? "M: MIXED" : string(sys, ": ", SYSTEM_NAMES[sys])
+    sys == 'M' ? "M: Mixed" : string(sys, ": ", SYSTEM_NAMES[sys])
 end
 
 # Time systems of the constellations, as the three-letter codes of the

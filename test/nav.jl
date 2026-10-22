@@ -86,7 +86,7 @@ end
     end
 
     # Without a fixed satellite_system the file is marked as mixed.
-    @test content(lines[1]) == "     3.05           N: GNSS NAV DATA    M: MIXED"
+    @test content(lines[1]) == "     3.05           N: GNSS NAV DATA    M: Mixed"
 
     body = body_lines(lines)
     @test length(body) == 16
@@ -240,23 +240,23 @@ end
 @testset "Table A8 bit fields" begin
     # The two records of a Galileo receiver: I/NAV from E1-B with the
     # E5b/E1 clock parameters, F/NAV from E5a-I with the E5a/E1 ones.
-    @test galileo_data_sources(; inav_e1b = true) == 513.0
-    @test galileo_data_sources(; fnav_e5a = true) == 258.0
+    @test galileo_data_sources(; inav_e1b = true) === 513
+    @test galileo_data_sources(; fnav_e5a = true) === 258
     # I/NAV decoded from both of its carriers.
-    @test galileo_data_sources(; inav_e1b = true, inav_e5b = true) == 517.0
+    @test galileo_data_sources(; inav_e1b = true, inav_e5b = true) === 517
     # The default of GalileoEphemeris is the I/NAV record.
     @test gal_eph.data_sources == galileo_data_sources(; inav_e1b = true)
     # A record needs a message source.
     @test_throws ArgumentError galileo_data_sources()
 
-    @test galileo_sv_health() == 0.0
+    @test galileo_sv_health() === 0
     # E1-B data invalid and out of service, E5a/E5b healthy.
-    @test galileo_sv_health(; e1b_dvs = 1, e1b_hs = 1) == 3.0
+    @test galileo_sv_health(; e1b_dvs = 1, e1b_hs = 1) === 3
     # Every field of the packed word, in its own bits.
-    @test galileo_sv_health(; e5a_dvs = 1) == 8.0
-    @test galileo_sv_health(; e5a_hs = 3) == 48.0
-    @test galileo_sv_health(; e5b_dvs = 1) == 64.0
-    @test galileo_sv_health(; e5b_hs = 3) == 384.0
+    @test galileo_sv_health(; e5a_dvs = 1) === 8
+    @test galileo_sv_health(; e5a_hs = 3) === 48
+    @test galileo_sv_health(; e5b_dvs = 1) === 64
+    @test galileo_sv_health(; e5b_hs = 3) === 384
     @test_throws ArgumentError galileo_sv_health(; e1b_dvs = 2)
     @test_throws ArgumentError galileo_sv_health(; e5b_hs = 4)
 end
@@ -424,10 +424,10 @@ end
     @test_throws ArgumentError galileo_data_sources(; fnav_e5a = true, inav_e1b = true)
     @test_throws ArgumentError galileo_data_sources(; fnav_e5a = true, inav_e5b = true)
     # The clock is the one the message broadcasts, and no longer chosen.
-    @test galileo_data_sources(; inav_e5b = true) == 516.0
+    @test galileo_data_sources(; inav_e5b = true) === 516
     @test_throws MethodError galileo_data_sources(; fnav_e5a = true, clock_e5a_e1 = true)
     # The pairs a receiver does produce are unaffected.
-    @test galileo_data_sources(; inav_e1b = true, inav_e5b = true) == 517.0
+    @test galileo_data_sources(; inav_e1b = true, inav_e5b = true) === 517
 end
 
 @testset "ionospheric corrections are of a Table A5 type" begin
@@ -463,4 +463,13 @@ end
     close(writer)
     # The rejected record left nothing behind.
     @test count(startswith("G13"), readlines(seekstart(io))) == 1
+end
+
+@testset "counters and bit fields are integers" begin
+    @test gps_eph.week === 2086
+    @test gps_eph.iodc === 83
+    @test gal_eph.data_sources isa Int
+    # A whole number given as a float converts; a fraction is no counter.
+    @test modify(gps_eph; iode = 84.0).iode === 84
+    @test_throws InexactError modify(gps_eph; iode = 83.5)
 end
