@@ -159,8 +159,8 @@ bit fields of that record are assembled by `galileo_data_sources` and
 `galileo_sv_health` rather than by hand:
 
 ```julia
-data_sources = galileo_data_sources(; inav_e1b = true, clock_e5b_e1 = true)  # 513
-sv_health = galileo_sv_health(; e1b_dvs = 1, e1b_hs = 1)                     # 3
+data_sources = galileo_data_sources(; inav_e1b = true)    # 513, with the E5b/E1 clock
+sv_health = galileo_sv_health(; e1b_dvs = 1, e1b_hs = 1)  # 3
 ```
 
 BeiDou D1/D2 ephemerides are written with `BeiDouEphemeris` (RINEX Table

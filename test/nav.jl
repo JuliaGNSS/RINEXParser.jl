@@ -240,22 +240,14 @@ end
 @testset "Table A8 bit fields" begin
     # The two records of a Galileo receiver: I/NAV from E1-B with the
     # E5b/E1 clock parameters, F/NAV from E5a-I with the E5a/E1 ones.
-    @test galileo_data_sources(; inav_e1b = true, clock_e5b_e1 = true) == 513.0
-    @test galileo_data_sources(; fnav_e5a = true, clock_e5a_e1 = true) == 258.0
+    @test galileo_data_sources(; inav_e1b = true) == 513.0
+    @test galileo_data_sources(; fnav_e5a = true) == 258.0
     # I/NAV decoded from both of its carriers.
-    @test galileo_data_sources(; inav_e1b = true, inav_e5b = true, clock_e5b_e1 = true) ==
-          517.0
+    @test galileo_data_sources(; inav_e1b = true, inav_e5b = true) == 517.0
     # The default of GalileoEphemeris is the I/NAV record.
-    @test gal_eph.data_sources ==
-          galileo_data_sources(; inav_e1b = true, clock_e5b_e1 = true)
-    # A record needs a message source and exactly one clock reference.
-    @test_throws ArgumentError galileo_data_sources(; clock_e5b_e1 = true)
-    @test_throws ArgumentError galileo_data_sources(; inav_e1b = true)
-    @test_throws ArgumentError galileo_data_sources(;
-        inav_e1b = true,
-        clock_e5a_e1 = true,
-        clock_e5b_e1 = true,
-    )
+    @test gal_eph.data_sources == galileo_data_sources(; inav_e1b = true)
+    # A record needs a message source.
+    @test_throws ArgumentError galileo_data_sources()
 
     @test galileo_sv_health() == 0.0
     # E1-B data invalid and out of service, E5a/E5b healthy.
@@ -422,15 +414,18 @@ end
 end
 
 @testset "a Galileo record cannot come from I/NAV and F/NAV at once" begin
-    # Table A8: the two messages carry different information, so a record
-    # decoded from both is not one record.
+    # Section 5.4.3: each message is a record of its own, with the clock
+    # pair that message broadcasts.
     @test_throws ArgumentError galileo_data_sources(;
         inav_e1b = true,
         fnav_e5a = true,
         inav_e5b = true,
-        clock_e5b_e1 = true,
     )
+    @test_throws ArgumentError galileo_data_sources(; fnav_e5a = true, inav_e1b = true)
+    @test_throws ArgumentError galileo_data_sources(; fnav_e5a = true, inav_e5b = true)
+    # The clock is the one the message broadcasts, and no longer chosen.
+    @test galileo_data_sources(; inav_e5b = true) == 516.0
+    @test_throws MethodError galileo_data_sources(; fnav_e5a = true, clock_e5a_e1 = true)
     # The pairs a receiver does produce are unaffected.
-    @test galileo_data_sources(; inav_e1b = true, inav_e5b = true, clock_e5b_e1 = true) ==
-          517.0
+    @test galileo_data_sources(; inav_e1b = true, inav_e5b = true) == 517.0
 end
