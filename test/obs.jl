@@ -6,6 +6,7 @@
         approx_position = (4141446.0044, 604023.0011, 4796597.5545),
         obs_types = ['G' => ["C1C", "L1C", "D1C", "S1C"]],
         interval = 1.0,
+        clock_offset_applied = false,
         leap_seconds = 18,
     )
     epoch = ObsEpoch(
@@ -48,6 +49,7 @@
             "SYS / # / OBS TYPES",
             "INTERVAL",
             "TIME OF FIRST OBS",
+            "RCV CLOCK OFFS APPL",
             "SYS / PHASE SHIFT",
             "GLONASS SLOT / FRQ #",
             "GLONASS COD/PHS/BIS",
@@ -61,7 +63,8 @@
         @test content(lines[10]) == "G    4 C1C L1C D1C S1C"
         # Time of first obs is taken from the first epoch.
         @test content(lines[12]) == "  2020     1     1     0     0   30.0000000     GPS"
-        @test content(lines[13]) == "G L1C"
+        @test content(lines[13]) == "     0"
+        @test content(lines[14]) == "G L1C"
     end
 
     @testset "epoch record" begin
@@ -236,7 +239,10 @@
         @test_throws ArgumentError seconds(NaN)
         # So does the receiver clock offset of the epoch record.
         offset(value) = write_epoch!(
-            RinexObsWriter(IOBuffer(), RinexObsHeader(obs_types = ['G' => ["C1C"]])),
+            RinexObsWriter(
+                IOBuffer(),
+                RinexObsHeader(obs_types = ['G' => ["C1C"]], clock_offset_applied = false),
+            ),
             ObsEpoch(DateTime(2020, 1, 1), SatObs[]; clock_offset = value),
         )
         @test isnothing(offset(-0.999))
@@ -251,6 +257,7 @@
     @testset "epochs are written without allocating per field" begin
         many = RinexObsHeader(
             obs_types = ['G' => ["C1C", "L1C", "D1C", "S1C", "C5Q", "L5Q", "D5Q", "S5Q"]],
+            clock_offset_applied = false,
         )
         sats = [
             SatObs(
@@ -703,4 +710,19 @@ end
         IOBuffer(),
         RinexObsHeader(obs_types = ['G' => ["C1C"], 'E' => ["C1C"]]),
     ) isa RinexObsWriter
+end
+
+@testset "a clock offset needs the RCV CLOCK OFFS APPL record" begin
+    epoch = ObsEpoch(DateTime(2020, 1, 1), SatObs[]; clock_offset = -1.0e-4)
+    io = IOBuffer()
+    writer = RinexObsWriter(io, RinexObsHeader(obs_types = ['G' => ["C1C"]]))
+    write_epoch!(writer, ObsEpoch(DateTime(2020, 1, 1), SatObs[]))
+    written = position(io)
+    @test_throws ArgumentError write_epoch!(writer, epoch)
+    @test position(io) == written
+    for applied in (false, true)
+        header =
+            RinexObsHeader(obs_types = ['G' => ["C1C"]], clock_offset_applied = applied)
+        @test isnothing(write_epoch!(RinexObsWriter(IOBuffer(), header), epoch))
+    end
 end
