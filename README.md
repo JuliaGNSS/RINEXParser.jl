@@ -154,7 +154,8 @@ end
 Galileo I/NAV and F/NAV ephemerides are written with `GalileoEphemeris`
 (RINEX Table A8: `iodnav`, `data_sources`, `sisa`, `bgd_e5a_e1`,
 `bgd_e5b_e1`, ...); the Klobuchar-style NeQuick coefficients go into an
-`IonosphericCorrection("GAL", (ai0, ai1, ai2, 0.0))` header record. The two
+`IonosphericCorrection("GAL", (ai0, ai1, ai2))` header record, whose spare
+fourth field is written blank. The two
 bit fields of that record are assembled by `galileo_data_sources` and
 `galileo_sv_health` rather than by hand:
 

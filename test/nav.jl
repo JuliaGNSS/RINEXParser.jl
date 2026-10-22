@@ -429,3 +429,25 @@ end
     # The pairs a receiver does produce are unaffected.
     @test galileo_data_sources(; inav_e1b = true, inav_e5b = true) == 517.0
 end
+
+@testset "ionospheric corrections are of a Table A5 type" begin
+    @test_throws ArgumentError IonosphericCorrection("GPSC", (1.0, 0.0, 0.0, 0.0))
+    @test_throws ArgumentError IonosphericCorrection("gpsa", (1.0, 0.0, 0.0, 0.0))
+    @test_throws ArgumentError IonosphericCorrection("GPSA", (1.0, 0.0, 0.0))
+    # The GAL record carries three coefficients and a blank spare; a zero
+    # passed for the spare is dropped, anything else is not a spare.
+    three = IonosphericCorrection("GAL", (80.0, 0.1, 0.01))
+    @test three.parameters == (80.0, 0.1, 0.01)
+    @test IonosphericCorrection("GAL", (80.0, 0.1, 0.01, 0.0)).parameters ==
+          three.parameters
+    @test_throws ArgumentError IonosphericCorrection("GAL", (80.0, 0.1, 0.01, 1.0))
+    lines = written_lines(
+        RinexNavWriter,
+        RinexNavHeader(ionospheric_corrections = [three]),
+    ) do writer
+    end
+    record = only(filter(l -> label(l) == "IONOSPHERIC CORR", lines))
+    @test record[1:5] == "GAL  "
+    @test record[42:53] == " "^12
+    @test strip(record[6:41]) != ""
+end
