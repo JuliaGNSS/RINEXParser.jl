@@ -24,9 +24,12 @@ the field normally requires a value; the adapter must ensure required values
 are present. Other values must be finite and fit their numeric columns. The
 writer checks those constraints before emitting any of the record.
 
-A deduplication key must distinguish satellites, reference times (including the
-week where needed), issues of data, and independent navigation message sources.
-An issue counter alone can wrap and is not a sufficient key.
+A deduplication key must change whenever the contents of the record change,
+leaving out only what changes with every broadcast of the same record, such as
+the transmission time. Section 5.4.3 asks for a new record when the contents
+change, and health or data validity can change without the issue of data, so a
+key of satellite, issue of data and reference time is not sufficient. The
+built-in types use every field but the transmission time.
 
 Keep constellation and unit conversions in the adapter. RINEX constellation
 characters and observation codes describe the file format; signal types

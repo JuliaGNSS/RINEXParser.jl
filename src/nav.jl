@@ -166,11 +166,7 @@ Base.@kwdef struct GPSEphemeris
 end
 
 satellite_system(::GPSEphemeris) = 'G'
-# `toe` is a second of the week and `iodc` a 10-bit counter, so neither
-# separates two ephemerides of different weeks on its own: the week belongs
-# in the key, or a record would be dropped as a repeat of one a week older.
-dedupe_key(eph::GPSEphemeris) =
-    (satellite_system(eph), eph.prn, eph.iodc, eph.week, eph.toe)
+dedupe_key(eph::GPSEphemeris) = record_contents(eph, (:transmission_time,))
 orbit_lines(eph::GPSEphemeris) = (
     (eph.iode, eph.crs, eph.deltan, eph.m0),
     (eph.cuc, eph.e, eph.cus, eph.sqrt_a),
@@ -306,11 +302,7 @@ check_health_field(value::Integer, name, largest) =
     throw(ArgumentError("Health field $name is $value, but it holds 0-$largest"))
 
 satellite_system(::GalileoEphemeris) = 'E'
-# I/NAV and F/NAV broadcast the same orbit for one IODnav but different
-# clock parameters and group delays, so RINEX 3.05 keeps them as separate
-# records: the message source is part of the record identity.
-dedupe_key(eph::GalileoEphemeris) =
-    (satellite_system(eph), eph.prn, eph.iodnav, eph.week, eph.toe, eph.data_sources)
+dedupe_key(eph::GalileoEphemeris) = record_contents(eph, (:transmission_time,))
 orbit_lines(eph::GalileoEphemeris) = (
     (eph.iodnav, eph.crs, eph.deltan, eph.m0),
     (eph.cuc, eph.e, eph.cus, eph.sqrt_a),
@@ -376,10 +368,9 @@ Base.@kwdef struct BeiDouEphemeris
 end
 
 satellite_system(::BeiDouEphemeris) = 'C'
-# `aode` counts the hours the parameter set has been in use, so it grows
-# while the ephemeris stays the same and cannot identify the record; the
-# reference times do, as BeiDou issues a new `toe` with every new set.
-dedupe_key(eph::BeiDouEphemeris) = (satellite_system(eph), eph.prn, eph.toc, eph.toe)
+# The ages of the ephemeris and clock data count up while the parameter set
+# stays the same, so like the transmission time they do not change a record.
+dedupe_key(eph::BeiDouEphemeris) = record_contents(eph, (:transmission_time, :aode, :aodc))
 # Broadcast orbit line 5 holds a spare between IDOT and the week, written
 # blank as section 6.4 asks and the example of Table A15 shows; the spares
 # trailing the week and the age of the clock data end their line and are
@@ -399,17 +390,31 @@ orbit_lines(eph::BeiDouEphemeris) = (
 clock_coefficients(eph) = (eph.af0, eph.af1, eph.af2)
 
 """
+    record_contents(eph, ignored) -> Tuple
+
+Every field of `eph` except the `ignored` ones, as the key of a record.
+Section 5.4.3 asks for a new record whenever the contents change, and the
+health, accuracy or data validity status can change without the issue of
+data: a key made of the identifying fields alone would drop that update.
+The transmission time is always ignored, since every broadcast of the same
+record carries a new one.
+"""
+record_contents(eph, ignored::Tuple{Vararg{Symbol}}) = (
+    satellite_system(eph),
+    (getfield(eph, f) for f in fieldnames(typeof(eph)) if !(f in ignored))...,
+)
+
+"""
     RinexNavWriter(target, header::RinexNavHeader)
 
 Streaming writer for a RINEX 3.05 navigation file. `target` is a path or
 an `IO`. The header is written lazily on the first
-[`write_ephemeris!`](@ref). Ephemerides repeating a record that was
-already written - same satellite, issue of data, time of ephemeris, and
-for Galileo the navigation message source - are skipped, so it is safe to
-forward every decoded subframe. A BeiDou record is identified by its
-reference times instead of its issue of data, whose age counter grows
-while the ephemeris stays the same. Close the writer (or use the do-block
-form) to flush the file.
+[`write_ephemeris!`](@ref). An ephemeris repeating a record that was
+already written - the same contents but for the transmission time, and for
+BeiDou the ages of the data - is skipped, so it is safe to forward every
+decoded subframe; one whose health, accuracy or any other value changed
+under the same issue of data is a new record, as section 5.4.3 asks. Close
+the writer (or use the do-block form) to flush the file.
 """
 mutable struct RinexNavWriter{T<:IO}
     io::T

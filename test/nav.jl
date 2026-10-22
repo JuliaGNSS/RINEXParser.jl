@@ -473,3 +473,32 @@ end
     @test modify(gps_eph; iode = 84.0).iode === 84
     @test_throws InexactError modify(gps_eph; iode = 83.5)
 end
+
+@testset "a record whose contents changed under the same issue of data" begin
+    # Section 5.4.3: health and data validity can change without the issue
+    # of data, and the update is a new record.
+    function written(ephemerides)
+        io = IOBuffer()
+        RinexNavWriter(io, RinexNavHeader()) do writer
+            foreach(eph -> write_ephemeris!(writer, eph), ephemerides)
+        end
+        count(l -> occursin(r"^[GEC][0-9]{2} ", l), body_lines(readlines(seekstart(io))))
+    end
+    unhealthy = galileo_sv_health(; e1b_dvs = 1)
+    for (eph, changed) in (
+        (gps_eph, modify(gps_eph; sv_health = 1)),
+        (gal_eph, modify(gal_eph; sv_health = unhealthy)),
+        (gal_eph, modify(gal_eph; sisa = 7.0)),
+        (bds_eph, modify(bds_eph; sath1 = 1)),
+    )
+        @test written([eph, changed]) == 2
+        # Every broadcast of the same record has a new transmission time.
+        @test written([eph, modify(eph; transmission_time = eph.transmission_time + 30)]) ==
+              1
+    end
+    # The ages of BeiDou data count up while the parameter set stays.
+    @test written([
+        bds_eph,
+        modify(bds_eph; aode = bds_eph.aode + 1, aodc = bds_eph.aodc + 1),
+    ]) == 1
+end
