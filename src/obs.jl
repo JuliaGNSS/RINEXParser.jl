@@ -94,6 +94,18 @@ phases that were corrected to align them with the reference signal of their
 band; a phase code no entry names is written as a reference signal that
 needed none.
 
+`signal_strength_unit` is the unit of the `S` observations, written to the
+optional `SIGNAL STRENGTH UNIT` record; `"DBHZ"` is the one RINEX 3.05
+defines. Left as `nothing`, the record is omitted and the unit is
+receiver-dependent as far as a reader knows.
+
+`clock_offset_applied` is the optional `RCV CLOCK OFFS APPL` record: `true`
+declares that the epochs, code and phase were corrected by the receiver
+clock offset - a receiver that steers its epochs onto system time does so -
+and `false` that they were not. Left as `nothing`, the record is omitted,
+which a reader takes as `false`; the format requires the record when the
+epochs report a `clock_offset`.
+
 `time_of_first_obs` may be left as `nothing`; it is then taken from the
 first epoch passed to [`write_epoch!`](@ref) and assigned to the header, so
 that [`rinex_filename`](@ref) can name the file from the header afterwards.
@@ -122,8 +134,10 @@ Base.@kwdef mutable struct RinexObsHeader
     antenna_delta_hen::NTuple{3,Float64} = (0.0, 0.0, 0.0)
     obs_types::Vector{Pair{Char,Vector{String}}}
     phase_shifts::Vector{PhaseShift} = PhaseShift[]
+    signal_strength_unit::Union{Nothing,String} = nothing
     interval::Union{Nothing,Float64} = nothing
     time_of_first_obs::Union{Nothing,DateTime} = nothing
+    clock_offset_applied::Union{Nothing,Bool} = nothing
     leap_seconds::Union{Nothing,LeapSeconds} = nothing
 end
 
@@ -136,9 +150,11 @@ conventions: pseudorange in meters, carrier phase in whole cycles, Doppler
 in Hz, signal strength in dB-Hz.
 
 The loss-of-lock indicator is a bit field of three bits, so it holds 0-7
-(section 6.7.1). The signal strength is documented as 1-9, and `ssi = 0` is
-accepted next to those: it is what a receiver reports for a projected signal
-strength it does not have yet.
+(section 6.7.1); [`loss_of_lock_indicator`](@ref) sets its bits by name. The
+signal strength is documented as 1-9, and `ssi = 0` is accepted next to
+those: it is what a receiver reports for a projected signal strength it does
+not have yet. [`signal_strength_indicator`](@ref) derives it from a C/N₀ in
+dB-Hz.
 
 A non-finite `value` is written as a blank field, which is how RINEX
 records that an observation type carries no measurement for a satellite.
@@ -161,6 +177,44 @@ check_indicator(indicator::Integer, name, largest) =
     throw(
         ArgumentError("Observation indicator $name is $indicator, but it holds 0-$largest"),
     )
+
+"""
+    loss_of_lock_indicator(; loss_of_lock = false, half_cycle = false, boc_tracking = false) -> Int
+
+The loss-of-lock indicator of an [`ObsValue`](@ref), assembled from the
+bits RINEX 3.05 section 6.7.1 gives it, so that none of them is set by its
+number:
+
+  - `loss_of_lock` (bit 0): lock was lost between the previous and this
+    observation, so a cycle slip is possible.
+  - `half_cycle` (bit 1): a half-cycle ambiguity or slip is possible, as it
+    is for a phase tracked before the bit or pilot synchronisation resolved
+    the polarity of the carrier. Software that cannot handle half cycles
+    skips the observation. It holds for this epoch only.
+  - `boc_tracking` (bit 2): an MBOC-modulated signal was tracked as BOC,
+    which may make it noisier.
+
+The indicator is defined for carrier phase observations only.
+
+    ObsValue(phase; lli = loss_of_lock_indicator(half_cycle = !polarity_known))
+"""
+loss_of_lock_indicator(; loss_of_lock = false, half_cycle = false, boc_tracking = false) =
+    Int(loss_of_lock) | Int(half_cycle) << 1 | Int(boc_tracking) << 2
+
+"""
+    signal_strength_indicator(cn0) -> Union{Int,Nothing}
+
+The signal-strength indicator of an [`ObsValue`](@ref) for the carrier to
+noise density `cn0` in dB-Hz, by the mapping RINEX 3.05 section 6.7.2
+standardises: `min(max(floor(cn0 / 6), 1), 9)`, which puts the threshold of
+good tracking, 5, at 30 dB-Hz. A value that is not finite is a signal
+strength that is not known and returns `nothing`, which is written as a
+blank indicator.
+
+    ObsValue(pseudorange; ssi = signal_strength_indicator(cn0))
+"""
+signal_strength_indicator(cn0::Real) =
+    isfinite(cn0) ? floor(Int, clamp(cn0, 6, 54) / 6) : nothing
 
 """
     SatObs(system, prn, observations)
@@ -337,6 +391,8 @@ function check_obs_header(header::RinexObsHeader)
     check_header_field(header.receiver_version, 20, "The receiver version")
     check_header_field(header.antenna_number, 20, "The antenna number")
     check_header_field(header.antenna_type, 20, "The antenna type")
+    isnothing(header.signal_strength_unit) ||
+        check_header_field(header.signal_strength_unit, 20, "The signal strength unit")
     for (i, shift) in enumerate(header.phase_shifts)
         check_phase_shift_satellites(shift.system, shift.code, shift.satellites)
         codes = obs_types_for(header, shift.system)
@@ -430,6 +486,9 @@ function write_obs_header(writer::RinexObsWriter, first_epoch_time, first_epoch_
             header_line(io, lead * join(" " .* chunk), "SYS / # / OBS TYPES")
         end
     end
+    if !isnothing(header.signal_strength_unit)
+        header_line(io, header.signal_strength_unit, "SIGNAL STRENGTH UNIT")
+    end
     if !isnothing(header.interval)
         header_line(io, Printf.format(FMT_F10_3, header.interval), "INTERVAL")
     end
@@ -456,6 +515,9 @@ function write_obs_header(writer::RinexObsWriter, first_epoch_time, first_epoch_
             " "^5 *
             time_system(first.(header.obs_types))
         header_line(io, content, "TIME OF FIRST OBS")
+    end
+    if !isnothing(header.clock_offset_applied)
+        header_line(io, lpad(Int(header.clock_offset_applied), 6), "RCV CLOCK OFFS APPL")
     end
     # One record per carrier phase, which the format makes mandatory: the
     # correction that aligned it, or a blank saying it is the reference
