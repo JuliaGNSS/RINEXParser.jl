@@ -654,8 +654,20 @@ function day_of_year_time(year::Int, day_of_year::Int, hour::Int, minute::Int)
     DateTime(year) + Day(day_of_year - 1) + Hour(hour) + Minute(minute)
 end
 
+# `00U` is the one spelling of "not specified": a count with the unit would
+# be dropped, and the name read back as a different one.
+function check_unspecified_count(count::Int, field)
+    count == 0 || throw(
+        ArgumentError(
+            "The $field field is unspecified ('U'), which is written with a count " *
+            "of 00, not $(lpad(count, 2, '0'))",
+        ),
+    )
+    nothing
+end
+
 function parse_period(count::Int, unit::Char)
-    unit == 'U' && return nothing
+    unit == 'U' && return check_unspecified_count(count, "file-period")
     unit == 'Y' && return Year(count)
     index = findfirst(pair -> first(pair) == unit, PERIOD_UNITS)
     isnothing(index) && throw(
@@ -668,7 +680,7 @@ function parse_period(count::Int, unit::Char)
 end
 
 function parse_interval(count::Int, unit::Char)
-    unit == 'U' && return nothing
+    unit == 'U' && return check_unspecified_count(count, "data-frequency")
     count > 0 || throw(
         ArgumentError(
             "A data frequency of $count of the unit '$unit' is not a sampling rate",
