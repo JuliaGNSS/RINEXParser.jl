@@ -13,6 +13,14 @@ function modify(eph::T; kwargs...) where {T}
     T(; fields...)
 end
 
+# Zero phase shifts for every carrier phase of `obs_codes`: the data of a
+# test that is not about alignment arrived aligned, which holds for any code
+# without asking Table A23 which ones a header has to state.
+aligned_phase_shifts(obs_codes) = [
+    PhaseShift(system, code, 0.0) for (system, codes) in obs_codes for
+    code in codes if startswith(code, "L")
+]
+
 body_lines(lines) = lines[(findfirst(l->label(l)=="END OF HEADER", lines)+1):end]
 
 # A broadcast orbit line carries four values of 19 columns each, after the
