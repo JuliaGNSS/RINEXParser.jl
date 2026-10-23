@@ -125,6 +125,22 @@ Base.@kwdef mutable struct RinexNavHeader
 end
 
 """
+    nav_satellite_system(systems) -> Union{Nothing,Char}
+
+The `satellite_system` of a [`RinexNavHeader`](@ref) for a file that may
+carry ephemerides of `systems`, the satellite system characters: the one
+system of a single-constellation file, `nothing` for a mixed one. Settled
+from the constellations a file can carry rather than those seen so far, it
+does not reject a second constellation that shows up later.
+
+    RinexNavHeader(; satellite_system = nav_satellite_system(['G', 'E']))  # mixed
+"""
+function nav_satellite_system(systems)
+    distinct = unique(systems)
+    length(distinct) == 1 ? check_satellite_system(only(distinct)) : nothing
+end
+
+"""
     GPSEphemeris(; kwargs...)
 
 One GPS LNAV broadcast ephemeris in the units RINEX expects (semicircle

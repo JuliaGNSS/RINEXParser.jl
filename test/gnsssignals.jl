@@ -72,3 +72,32 @@ end
     # The time system of a signal's measurements has a code.
     @test time_system(get_time_system(BeiDouB1I())) == "BDT"
 end
+
+@testset "the obs_codes of a header from its signals" begin
+    obs_codes = observation_codes([GPSL1CA(), GalileoE1B(), GPSL5Q()])
+    @test obs_codes == [
+        'G' => ["C1C", "L1C", "D1C", "S1C", "C5Q", "L5Q", "D5Q", "S5Q"],
+        'E' => ["C1B", "L1B", "D1B", "S1B"],
+    ]
+    # A header of them is one the writer takes, phase shift given.
+    header = RinexObsHeader(;
+        obs_codes,
+        phase_shifts = [PhaseShift('G', "L5Q", phase_correction('G', "L5Q"))],
+    )
+    @test RinexObsWriter(IOBuffer(), header) isa RinexObsWriter
+    # A shared code is declared once.
+    @test observation_codes([GalileoE1B(), GalileoE1B_BOC11()]) ==
+          ['E' => ["C1B", "L1B", "D1B", "S1B"]]
+    @test observation_codes([BeiDouB1I()]; types = ('C', 'S')) == ['C' => ["C2I", "S2I"]]
+    @test isempty(observation_codes(AbstractGNSSSignal[]))
+    @test_throws ArgumentError observation_codes([GPSL1CA()]; types = ('X',))
+end
+
+@testset "the epoch time of a GNSSSignals time system" begin
+    for code in ("GPS", "GAL", "BDT")
+        @test epoch_time(gnss_time_system(code); week = 730, time_of_week = 86400.25) ==
+              epoch_time(code; week = 730, time_of_week = 86400.25)
+    end
+    @test epoch_time(GNSSSignals.BDT(); week = 730, time_of_week = 86400).time ==
+          DateTime(2019, 12, 30)
+end

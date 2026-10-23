@@ -58,8 +58,11 @@ With GNSSDecoder loaded, [`rinex_ephemeris`](@ref) converts a decoded
 navigation message into its record, [`has_rinex_ephemeris`](@ref) says
 whether RINEX 3.05 has one for it, and [`add_header_records!`](@ref) collects
 the header records it carries; with GNSSSignals loaded,
-[`observation_code`](@ref) names the observables of a signal and
-[`gnss_time_system`](@ref) the time system of a file's epochs. A record built
+[`observation_code`](@ref) names the observables of a signal,
+[`observation_codes`](@ref) the `obs_codes` of a header for a set of signals,
+and [`gnss_time_system`](@ref) the time system of a file's epochs, which
+[`epoch_time`](@ref) also takes. [`nav_satellite_system`](@ref) settles the
+`satellite_system` of a navigation file from the constellations it may carry. A record built
 by hand takes its week, `toc` and transmission time from
 [`navigation_times`](@ref), and an observation epoch its time from
 [`epoch_time`](@ref).

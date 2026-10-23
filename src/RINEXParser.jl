@@ -10,6 +10,7 @@ export phase_correction
 export loss_of_lock_indicator, signal_strength_indicator
 export LeapSeconds, time_system, epoch_time
 export RinexNavHeader,
+    nav_satellite_system,
     IonosphericCorrection,
     TimeSystemCorrection,
     GPSEphemeris,
@@ -22,7 +23,8 @@ export RinexNavHeader,
     navigation_times,
     ionosphere_time_mark
 # Methods in the package extensions for GNSSDecoder and GNSSSignals.
-export rinex_ephemeris, has_rinex_ephemeris, add_header_records!, observation_code
+export rinex_ephemeris, has_rinex_ephemeris, add_header_records!
+export observation_code, observation_codes
 export gnss_time_system
 
 const RINEX_VERSION = 3.05

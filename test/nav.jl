@@ -237,6 +237,14 @@ end
     @test write_ephemeris!(writer, gps_eph)
 end
 
+@testset "the satellite system of a file of systems" begin
+    @test nav_satellite_system(['G']) == 'G'
+    @test nav_satellite_system(('E', 'E')) == 'E'
+    @test isnothing(nav_satellite_system(['G', 'E']))
+    @test isnothing(nav_satellite_system(Char[]))
+    @test_throws ArgumentError nav_satellite_system(['X'])
+end
+
 @testset "Table A8 bit fields" begin
     # The two records of a Galileo receiver: I/NAV from E1-B with the
     # E5b/E1 clock parameters, F/NAV from E5a-I with the E5a/E1 ones.
