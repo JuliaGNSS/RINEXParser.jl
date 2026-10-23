@@ -23,9 +23,7 @@ is that writer's marker name, as they are when the navigation writer closes.
     nav = RinexNavWriter(RinexDirectory("/data"; session = obs), nav_header)
 
 Without a session, or with one that got no epoch, a navigation file starts
-at the `toc` of the first ephemeris it wrote - the reference time of the
-clock parameters, in the time system of that ephemeris, which the receiver
-need not have reached yet when it decoded it.
+at the `toc` of the first ephemeris it wrote.
 
 `kwargs` are the keywords of [`RinexFileName`](@ref) for the fields the
 header does not determine - `monument`, `receiver`, `country`,
@@ -33,15 +31,11 @@ header does not determine - `monument`, `receiver`, `country`,
 when the writer is created. The file is written uncompressed RINEX, so
 `format` and `compression` cannot be given.
 
-A file of the name that already exists is replaced only with `overwrite = true`. Otherwise, or if the file cannot be moved, it is left at its
-temporary path with a warning rather than an exception, so that `close`
-neither loses the data nor fails a writer that wrote it.
-[`file_path`](@ref) answers where the file ended up.
-
-A file is kept whenever it can be named, a header-only one included, as a
-writer to a path keeps it. A writer that wrote no record and has no start
-time - an observation writer that got no epoch, a navigation writer whose
-session got none either - cannot be named, holds no data, and is removed.
+An existing file of the name is replaced only with `overwrite = true`.
+Otherwise, or if the move fails, the file stays at its temporary path with a
+warning, and `close` does not throw; [`file_path`](@ref) says where it ended
+up. A file that cannot be named because it has no record and no start time
+is removed.
 """
 struct RinexDirectory
     directory::String
@@ -84,8 +78,7 @@ temporary path to its long filename and return that path. `start_time` is
 the one the file falls back on when neither the target nor the header gives
 one. A file that holds no record and cannot be named is removed, and
 `nothing` returned. One that cannot be moved stays where it is, with a
-warning, and its temporary path is returned: this runs inside `close`,
-where an exception would fail the writer after its data was written.
+warning, and its temporary path is returned, as this runs inside `close`.
 """
 function name_file!(writer, had_records::Bool, start_time = nothing)
     target = writer.directory

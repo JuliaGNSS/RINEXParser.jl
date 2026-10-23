@@ -142,8 +142,7 @@ struct RinexFileName
         compression,
     )
         file_type = check_file_type(file_type)
-        # The field is absent from a navigation file name, so an interval
-        # given for one would be dropped without a trace of it in the name.
+        # A navigation name has no data-frequency field to carry an interval.
         (file_type != 'N' || isnothing(interval)) || throw(
             ArgumentError(
                 "A navigation file name has no data-frequency field, so it cannot " *
@@ -157,11 +156,8 @@ struct RinexFileName
             check_site_digit(receiver, "receiver"),
             check_country(country),
             check_data_source(data_source),
-            # The field holds no seconds, so a start time that carries them
-            # would make the name say less than the record does. The period and
-            # the interval are kept as their own fields hold them for the same
-            # reason - and encoding them is what rejects a value no unit of
-            # those fields can express.
+            # Each kept as its field holds it; encoding the period and the
+            # interval also rejects a value no unit of their fields expresses.
             floor(check_start_time(start_time), Minute),
             field_period(period),
             field_interval(seconds),
@@ -410,31 +406,20 @@ end
 The file-period field of a long filename, written in the largest of the
 units minutes, hours, days and years that `period` is an exact multiple of:
 `Day(1)` becomes `01D` and `Minute(15)` becomes `15M`. `nothing` becomes the
-`00U` the spec provides for a file whose intended collection period is not
-specified.
+`00U` of a period that is not specified, the field's only zero count.
 
-Any period of a fixed length is measured the same way, whichever unit it is
-given in, and so is a sum of them: `Millisecond(60_000)` is `01M` and
-`Day(1) + Hour(12)` is `36H`. A period of no length is not one of collection
-and is rejected: the zero count of the field belongs to its `00U`.
+Any period of a fixed length, or a sum of them, is measured the same way:
+`Millisecond(60_000)` is `01M` and `Day(1) + Hour(12)` is `36H`.
 """
 period_field(::Nothing) = "00U"
 function period_field(period::Year)
     Dates.value(period) > 0 || period_positive_error(period)
     field_digits(Dates.value(period), 'Y', "The file period $period")
 end
-# `Dates.FixedPeriod` is Week down to Nanosecond: every period of a fixed
-# length takes the same rule, rather than only the units the field itself has.
-# `given` is the period as it was passed, which a compound one was summed from
-# and which the messages name rather than the sum.
+# `given` is the period as it was passed, which the error messages name
+# rather than the sum a compound one was turned into.
 function period_field(period::Dates.FixedPeriod, given = period)
-    # The zero count of the field belongs to its unit 'U': 00D would read as a
-    # collection period of zero days, where the field has an encoding for a
-    # period that is not specified. The data-frequency field rejects a zero
-    # sampling interval for the same reason.
     Dates.value(period) > 0 || period_positive_error(given)
-    # A period finer than a second has no unit here - the smallest unit of the
-    # field is a minute - and could not be converted to seconds exactly either.
     iszero(period % Second(1)) || period_unit_error(given)
     seconds = Dates.value(Second(period))
     for (unit, unit_period) in PERIOD_UNITS
@@ -444,15 +429,11 @@ function period_field(period::Dates.FixedPeriod, given = period)
     end
     period_unit_error(given)
 end
-# Arithmetic on periods answers a compound period - `Day(1) + Hour(12)` - which
-# is one period written in several units, so the fixed ones are summed back
-# into one. A compound carrying a month or a year is rejected like the month or
-# the year itself: it is no whole number of any single unit of the field.
+# A compound period (`Day(1) + Hour(12)`) is summed back into one, in
+# nanoseconds, which every fixed period converts to exactly. One carrying a
+# month or a year has no single unit of the field.
 function period_field(period::Dates.CompoundPeriod)
     all(part -> part isa Dates.FixedPeriod, period.periods) || period_no_unit_error(period)
-    # Summed in nanoseconds, the one unit every fixed period converts to
-    # exactly: a coarser one cannot hold the sub-millisecond part of a compound
-    # period and would throw where the checks of the sum answer for it.
     period_field(sum(Nanosecond, period.periods; init = Nanosecond(0)), period)
 end
 period_field(period::Dates.Period) = period_no_unit_error(period)
@@ -575,24 +556,18 @@ Read a RINEX long filename. `name` may be a path - only its last component
 is looked at - and its fields may be lower case, although a name that is
 written out is upper case as the convention prescribes.
 
-Rendering the name again is not always the name that was read, so a name is
-not a path: a field that is legal but not canonical is written in the unit
-the convention uses for it, `24H` coming back as `01D` and a `60S` sampling
-interval as `01M`. Keep the path itself if you need to open the file.
+A field that is legal but not canonical renders in the convention's unit
+(`24H` as `01D`, a `60S` interval as `01M`), so keep the path itself to open
+the file.
 
 `tryparse` answers `nothing` where `parse` throws an `ArgumentError`, which
 selects the file names of a directory that conform to the convention:
 
     filter(!isnothing, tryparse.(RinexFileName, readdir(directory)))
 
-The selection is as strict as the spec, which is stricter than an archive:
-the RINEX 2 short names (`algo1600.12o`) are a different convention and are
-not read at all, a compression field of one character (`.Z`, unix compress)
-is outside the two to three the convention gives it, a count of zero in a
-unit other than `U` is not the way either field encodes what it does not
-specify, and a navigation name that carries a data-frequency field it should
-not have is rejected rather than read into a name that would be written back
-without it.
+Reading is as strict as the spec. Not read: RINEX 2 short names
+(`algo1600.12o`), a one-character compression field (`.Z`), a zero count in
+a unit other than `U`, and a navigation name with a data-frequency field.
 """
 function Base.parse(::Type{RinexFileName}, name::AbstractString)
     fields = match(LONG_FILENAME, basename(name))
@@ -623,10 +598,8 @@ function Base.parse(::Type{RinexFileName}, name::AbstractString)
     )
 end
 
-# The field is mandatory outside a navigation name, where `00U` is how a
-# name says that its data frequency is not specified. A name that leaves the
-# field out instead is not one this convention writes, and reading it would
-# come back as a different name - the one with `00U` in it.
+# The field is mandatory outside a navigation name; `00U` says it is not
+# specified.
 function parse_frequency(count, unit, file_type::Char)
     if isnothing(count)
         uppercase(file_type) == 'N' || throw(
@@ -661,8 +634,6 @@ function day_of_year_time(year::Int, day_of_year::Int, hour::Int, minute::Int)
     DateTime(year) + Day(day_of_year - 1) + Hour(hour) + Minute(minute)
 end
 
-# `00U` is the one spelling of "not specified": a count with the unit would
-# be dropped, and the name read back as a different one.
 function check_unspecified_count(count::Int, field)
     count == 0 || throw(
         ArgumentError(
@@ -709,19 +680,16 @@ end
 """
     check_data_type_keywords(keywords, description, source, file_type)
 
-Reject `system` and `file_type` where a header determines them. The data type of a
-name follows from the file, and a keyword the header overrules afterwards
-would be dropped without a trace of it in the name - the same reason a
-navigation file name rejects an interval instead of ignoring it.
+Reject `system` and `file_type` where a header determines them, rather than
+let the header overrule them silently.
 """
 function check_data_type_keywords(keywords, description, source, file_type::Char)
     for keyword in (:system, :file_type)
         haskey(keywords, keyword) && throw(
             ArgumentError(
                 "The data type of $description file name follows from its header, " *
-                "where the system is $source and the file type is '$file_type', so $keyword " *
-                "cannot be given as a keyword: the name follows the file, not the " *
-                "other way round",
+                "where the system is $source and the file type is '$file_type', so " *
+                "$keyword cannot be given as a keyword",
             ),
         )
     end
@@ -769,15 +737,11 @@ constellation, several name a mixed file - and the data frequency from its
 a lazily written header may not carry yet.
 
 Any of the fields the header does not determine can be given as a keyword,
-as can `marker_name` to derive the site from a name other than the header's;
-`system` and `file_type` are the header's own and are rejected as keywords rather
-than dropped:
+as can `marker_name` to derive the site from another name; `system` and
+`file_type` cannot. A site field given as `nothing` is the one the marker
+name gives.
 
     rinex_filename(header, start_time; country = "DEU", period = Day(1))
-
-A site field given as `nothing` - `station`, `monument`, `receiver` or
-`country` - is the one the marker name gives, so a caller can pass on a
-setting that may be unset without overruling a site identification.
 """
 function RinexFileName(
     header::RinexObsHeader,
@@ -825,10 +789,9 @@ the site:
 
     rinex_filename(nav_header, start_time; marker_name = obs_header.marker_name)
 
-`system` and `file_type` are the header's own here too: a navigation file of one
-constellation is named by pinning the header's `satellite_system`, not by
-naming the file something the file is not. A site field given as `nothing`
-is the one the marker name gives, as for an observation file.
+As for an observation file, `system` and `file_type` cannot be given (pin
+the header's `satellite_system` instead), and a site field given as
+`nothing` is the one the marker name gives.
 """
 function RinexFileName(
     header::RinexNavHeader,

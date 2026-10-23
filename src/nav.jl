@@ -331,10 +331,8 @@ the continuous BDT week counted from the BDT epoch (2006-01-01) - the
 broadcast 13-bit week plus 8192 per roll-over - and the seconds of week are
 BDT seconds, 14 s behind GPS time.
 
-`transmission_time` is written as it is given and has to refer to `week`,
-so a message received after the week of the ephemeris rolled over is passed
-in adjusted by ±604800 s. The spec's encoding of a transmission time that is
-not known is `0.999999999999e9`.
+`transmission_time` refers to `week`, as [`navigation_times`](@ref) gives
+it; the spec's encoding of one that is not known is `0.999999999999e9`.
 """
 Base.@kwdef struct BeiDouEphemeris
     prn::Int
@@ -412,21 +410,17 @@ Streaming writer for a RINEX 3.05 navigation file. `target` is a path, an
 `IO`, or a [`RinexDirectory`](@ref) that names the file by the long
 filename convention when it is closed. The header is written lazily on the
 first [`write_ephemeris!`](@ref), and [`set_header!`](@ref) replaces it until
-then. An ephemeris repeating a record that was
-already written - the same contents but for the transmission time, and for
-BeiDou the ages of the data - is skipped, so it is safe to forward every
-decoded subframe; one whose health, accuracy or any other value changed
-under the same issue of data is a new record, as section 5.4.3 asks. Close
-the writer (or use the do-block form) to flush the file.
+then. An ephemeris whose contents, but for the transmission time (and for
+BeiDou the ages of data), match a written record is skipped, so it is safe
+to forward every decoded subframe. Close the writer (or use the do-block
+form) to flush the file.
 
 `overflow` says what becomes of an ephemeris with a value that does not fit
-its E19.12 field, or is not finite - which a navigation record, unlike an
-observation, has no blank encoding for. `:throw` rejects it with an
-`ArgumentError`. `:skip` leaves the record out, makes
-[`write_ephemeris!`](@ref) return `false`, and warns once per record, so
-that a receiver forwarding every decoded message keeps its output when one
-message was decoded wrong. Either way the file stays as it was: the whole
-record is checked before its first line is written.
+its E19.12 field or is not finite, for which a navigation record has no
+blank encoding. `:throw` rejects it with an `ArgumentError`; `:skip` leaves
+the record out, makes [`write_ephemeris!`](@ref) return `false`, and warns
+once per record. A record is checked whole before any of it is written, so
+a rejected one leaves the file as it was.
 """
 mutable struct RinexNavWriter{T<:IO}
     io::T
@@ -502,8 +496,7 @@ RinexNavWriter(
     keywords...,
 ) = with_writer(f, RinexNavWriter(target, header; keywords...))
 
-# Checked by every constructor before it opens a file, so that a writer it
-# rejects leaves none behind.
+# Checked before a file is opened, as in `check_writer`.
 function check_nav_writer(header, overflow)
     check_nav_header(header)
     overflow in (:throw, :skip) || throw(
@@ -515,9 +508,6 @@ function check_nav_writer(header, overflow)
     nothing
 end
 
-# Checked when the writer is created, not only when the header is written
-# out: the lazy header write happens inside `close`, where an exception
-# would leak the file handle and mask the exception of a do-block body.
 function check_nav_header(header::RinexNavHeader)
     isnothing(header.satellite_system) || check_satellite_system(header.satellite_system)
     check_header_field(header.program, 20, "The program of the header")
@@ -593,23 +583,15 @@ function write_nav_header(writer::RinexNavWriter)
     writer.header_written = true
 end
 
-# Every navigation record field is 19 columns of E19.12, and every value is
-# checked against them like an observation is against its own field. Unlike
-# an observation, an ephemeris field has no blank encoding that would mean
-# "not available", so a value that is not finite can only be an upstream bug
-# and is rejected instead of written as "NaN" into a numeric field. Only a
-# spare - `nothing` - is blank, and it is the one thing not checked.
-#
-# Returns `nothing`, or the `(line_number, field, value)` of the first value
-# that does not fit, for `write_ephemeris!` to reject or skip the record by.
+# Every navigation record field is 19 columns of E19.12. Only a spare
+# (`nothing`) is blank; every other value has to fit. Returns `nothing`, or
+# the `(line_number, field, value)` of the first value that does not, for
+# `write_ephemeris!` to reject or skip the record by.
 function add_orbit_values!(record::RecordBuffer, line_number::Int, values)
     # Counters and bit fields are integers, written as the floats of every
     # other field of the record.
     for (i, value) in enumerate(map(orbit_value, values))
-        # A spare the record has to keep a place for, because a value of the
-        # line follows it. Section 6.4 asks for spares to be left blank, so
-        # that a future version assigning them a meaning cannot be read out
-        # of a zero that was never broadcast.
+        # A spare followed by a value of the line, blank as section 6.4 asks.
         if isnothing(value)
             add_blanks!(record, 19)
             continue
@@ -664,24 +646,7 @@ for an ephemeris that was already written before, and for one the writer's
 `ArgumentError` if the header pins the file to a single constellation and
 `eph` belongs to another one.
 
-The whole record is checked before its first line is written, so an
-ephemeris this rejects leaves the file as it was.
-
-`eph` may be of any type implementing the ephemeris interface, so a
-constellation this package does not know yet can be written by defining
-
-  - `RINEXParser.satellite_system(eph)`: the RINEX satellite system character,
-  - `RINEXParser.dedupe_key(eph)`: a tuple identifying the record, see
-    [`RinexNavWriter`](@ref),
-  - `RINEXParser.orbit_lines(eph)`: one tuple of at most four values per
-    broadcast orbit line, in record order. Use `nothing` for a blank spare
-    field. Any `nothing` returned by this method writes a blank, even when
-    the field normally requires a value,
-  - `RINEXParser.clock_coefficients(eph)`: the three clock polynomial
-    coefficients, which default to the `af0`, `af1` and `af2` fields,
-
-The record must also expose `prn` (satellite number) and `toc` (`DateTime`
-in the constellation's RINEX time system) fields.
+`eph` may be of any type implementing the [Ephemeris interface](@ref).
 """
 function write_ephemeris!(writer::RinexNavWriter, eph)
     pinned = writer.header.satellite_system
@@ -706,8 +671,6 @@ function write_ephemeris!(writer::RinexNavWriter, eph)
             "navigation record holds whole seconds",
         ),
     )
-    # Assembled whole before it is written, so a rejected ephemeris leaves
-    # the file as it was.
     record = start_record!(writer.record)
     add_satellite_id!(record, sys, prn)
     add_char!(record, ' ')

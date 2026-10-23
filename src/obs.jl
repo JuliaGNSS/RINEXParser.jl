@@ -124,9 +124,8 @@ end
 # to the reference without saying by how much, or whose correction depends
 # on the satellite (GPS L2C on its block, QZSS L1S on Block I against II).
 # A band can hold more than one group, as BDS B1C and B1A share band 1. The
-# codes the table states no alignment for are left out: all of SBAS, the
-# GPS Y and M and Galileo A and Z signals, QZSS L1B, the QZSS L1Z it marks
-# N/A and the restricted NavIC L5B and L9B.
+# codes the table states no alignment for are left out (listed at
+# `phase_correction`).
 const PHASE_ALIGNMENT_GROUPS = Dict(
     'G' => (
         (
@@ -210,13 +209,9 @@ end
 The reference signal that RINEX 3.05 Table A23 gives the band of the
 carrier phase `code` of `system`. This is the signal the phase is aligned
 to: `"L2P"` for GPS `L2S`, `"L1B"` for Galileo `L1C`, and `code` itself for
-a reference signal. One band can hold more than one group of signals, each
-with a reference of its own. BDS B1C and B1A share band 1 with the
-references `L1D` and `L1S`.
-
-`nothing` is a code the table states no alignment for. These are all of
-SBAS, the restricted GPS Y and M and Galileo A and Z signals, QZSS `L1B`
-and `L1Z`, and NavIC `L5B` and `L9B`.
+a reference signal. A band can hold more than one group, each with its own
+reference: BDS B1C and B1A share band 1 with `L1D` and `L1S`. `nothing` is
+a code the table states no alignment for (see [`phase_correction`](@ref)).
 """
 function reference_code(system::Char, code::AbstractString)
     found = phase_alignment_entry(system, code)
@@ -231,23 +226,16 @@ phase `code` of `system`, as the satellite issues it, to align it with the
 reference signal of its band: `-0.25` for GPS `L2S`, `0.5` for Galileo `L1C`.
 The sign follows section 5.2.12, φ_RINEX = φ_original + Δφ.
 
-A receiver that issues its phases unaligned adds this to them and states it
-as the correction of the code's [`PhaseShift`](@ref). One whose phases
-arrive aligned states `0.0` instead. The correction is zero for the
-reference itself and for the signals the table gives no shift ("None").
+The correction is zero for the reference itself and for the signals the
+table gives no shift ("None").
 
-`nothing` is a code the table gives no number for. Some it says "must be
-aligned" to their reference without saying by how much (GPS `L5X`, the
-pilots of BDS-3, ...). Others depend on the satellite: GPS `L2C` on its
-block, and QZSS `L1S` on Block I against Block II. It is also `nothing` for
-the codes the table states no alignment for: all of SBAS, the restricted
-GPS Y and M and Galileo A and Z signals, QZSS `L1B` and `L1Z`, and NavIC
-`L5B` and `L9B`.
+`nothing` is a code the table gives no number for: one it says "must be
+aligned" without saying by how much (GPS `L5X`, the BDS-3 pilots, ...), one
+whose correction depends on the satellite (GPS `L2C`, QZSS `L1S`), or one it
+states no alignment for at all (all of SBAS, the restricted GPS Y and M and
+Galileo A and Z signals, QZSS `L1B` and `L1Z`, NavIC `L5B` and `L9B`).
 
-A header owes a code a [`PhaseShift`](@ref) unless its correction is `0.0`,
-which includes the reference itself, or the table states no alignment for
-it. Every other code needs one, whether `phase_correction` gives its number
-or `nothing`.
+See [`PhaseShift`](@ref) for which codes a header has to state a shift for.
 """
 function phase_correction(system::Char, code::AbstractString)
     found = phase_alignment_entry(system, code)
@@ -263,38 +251,26 @@ reference signal of its band (RINEX 3.05 Table A23). `satellites` names the
 satellite numbers the correction applies to; an empty list means every
 satellite of the system, which is the usual case.
 
-RINEX 3.05 section 5.2.12 gives the record three distinct readings, and the
-one a file makes is a statement about its data:
+The record has three readings (section 5.2.12):
 
-  - a **correction** (`-0.25`) says the phase was not aligned as it came out
-    of the receiver and this is what was added to align it,
-  - **zero** says the phase arrived aligned - from the receiver or from a
-    stream such as RTCM-MSM - and nothing was applied,
-  - a **blank** correction says the code needed none: it is the reference
-    signal of its band, or a code Table A23 aligns to it with "None". This
-    is what a code no `PhaseShift` names is written as.
+  - a **correction** (`-0.25`): this was added to align the phase,
+  - **zero**: the phase arrived aligned (from the receiver, or a stream such
+    as RTCM-MSM) and nothing was applied,
+  - **blank**: the code needed no correction, being the reference of its
+    band or aligned to it with "None". A code no `PhaseShift` names is
+    written so.
 
-The default is therefore a claim that no carrier phase in the file needed a
-correction. That holds for the reference signals and for the codes Table
-A23 aligns without one (GPS `L2W`, ...). A file carrying any other code (GPS
-`L2S`, Galileo `L1C`, ...) has to say which of the first two applies to it,
-or a reader cannot reconstruct what the receiver measured. So the writer
-rejects a header that has no shift for a code whose
-[`phase_correction`](@ref) is not zero. That function gives the correction
-the ICDs define for the code:
+So a header has to name every phase code Table A23 aligns with a
+correction other than zero, and the writer rejects one that does not. The
+correction is [`phase_correction`](@ref) for a receiver that applied the
+ICD value; where that is `nothing` but the table requires the phase aligned,
+state the one the receiver or converter applied. The codes the table states
+no alignment for need no shift.
 
     PhaseShift('E', "L1C", phase_correction('E', "L1C"))  # +0.5 was applied
 
-Where [`phase_correction`](@ref) is `nothing`, the table still requires the
-phase aligned but gives no correction that holds for every receiver or
-satellite, so the shift states the one the receiver or converter applied.
-
-A reference signal takes no correction other than zero, as nothing aligns
-it, and a shift naming one with any other is rejected.
-
-A shift limited to `satellites` names its code too. Section 5.2.12 lists
-the satellites a correction affects, so the others of the system read as
-having had nothing applied, as with zero.
+A reference signal takes no correction other than zero. A shift limited to
+`satellites` leaves the others of the system reading as zero.
 """
 struct PhaseShift
     system::Char
@@ -341,23 +317,19 @@ to keep the system order deterministic:
     obs_codes = ['G' => ["C1C", "L1C", "D1C", "S1C"]]
 
 `phase_shifts` carries the [`PhaseShift`](@ref) records of the carrier
-phases that were corrected to align them with the reference signal of their
-band. A phase code no entry names is written as one that needed none, so
-every phase code that RINEX 3.05 Table A23 gives a correction other than
-"None" needs an entry.
+phases that were aligned with the reference signal of their band; see
+[`PhaseShift`](@ref) for which codes need one.
 
 `signal_strength_unit` is the unit of the `S` observations, written to the
 optional `SIGNAL STRENGTH UNIT` record; `"DBHZ"` is the one RINEX 3.05
 defines. Left as `nothing`, the record is omitted and the unit is
 receiver-dependent as far as a reader knows.
 
-`clock_offset_applied` is the optional `RCV CLOCK OFFS APPL` record: `true`
-declares that the epochs, code and phase were corrected by the receiver
-clock offset - a receiver that steers its epochs onto system time does so -
-and `false` that they were not. Left as `nothing`, the record is omitted,
-which a reader takes as `false`. The format requires the record when the
-epochs report a `clock_offset`, so an epoch that carries one is rejected
-while this is `nothing`.
+`clock_offset_applied` is the optional `RCV CLOCK OFFS APPL` record: whether
+the epochs, code and phase were corrected by the receiver clock offset.
+Left as `nothing`, the record is omitted, which a reader takes as `false`,
+and an epoch reporting a `clock_offset` is rejected, as the format requires
+the record for it.
 
 `glonass_slots` lists the frequency channel number (-7 to +6) of each
 GLONASS slot as `slot => channel`, for the mandatory `GLONASS SLOT / FRQ #`
@@ -457,11 +429,9 @@ number:
   - `boc_tracking` (bit 2): an MBOC-modulated signal was tracked as BOC,
     which may make it noisier.
 
-The indicator is defined for carrier phase observations only - all of it,
-the BOC bit included: section 6.7.1 opens with "For phase observations
-only", and Table A3 associates the LLI with the phase observation alone. So
-[`write_epoch!`](@ref) rejects a non-zero one on any other observation code,
-and a BOC-tracked signal sets `boc_tracking` on its `L` observation.
+The indicator, BOC bit included, is defined for carrier phases only
+(section 6.7.1), so [`write_epoch!`](@ref) rejects a non-zero one on any
+other observation.
 
     ObsValue(phase; lli = loss_of_lock_indicator(half_cycle = !polarity_known))
 """
@@ -568,17 +538,13 @@ obs_value(value) = throw(
 """
     ObsEpoch(time, satellites; fractional_second = 0.0, flag = 0, clock_offset = nothing)
 
-One observation epoch. `time` is the epoch in the file's time system (GPS
-time for a GPS file); `fractional_second` carries sub-millisecond precision
-beyond `DateTime`, so it is less than a millisecond in magnitude. `clock_offset` is the optional receiver clock offset in
-seconds written at the end of the epoch record.
+One observation epoch. `time` is the epoch in the file's time system
+([`epoch_time`](@ref) gives it); `fractional_second` carries the
+sub-millisecond part `DateTime` cannot, so it is below a millisecond in
+magnitude. `clock_offset` is the optional receiver clock offset in seconds.
 
-`flag` is 0 for an ordinary epoch and 1 to mark a power failure between the
-previous epoch and this one. The remaining flags of RINEX 3.05 Table A3
-(2-5) introduce event records, whose epoch line counts header records rather
-than satellites and is followed by those instead of by observations; this
-writer does not produce them, so it rejects those flags rather than write
-observations under a record type that does not carry them.
+`flag` is 0 for an ordinary epoch and 1 for a power failure since the
+previous one. The event records of flags 2-5 (Table A3) are not written.
 """
 struct ObsEpoch
     time::DateTime
@@ -630,14 +596,12 @@ form) to flush the file.
         write_epoch!(writer, epoch)
     end
 
-`overflow` says what becomes of an observation value too wide for its 14
-columns, or a receiver clock offset too wide for its 15. `:throw` rejects
-the epoch with an `ArgumentError`, leaving the file as it was. `:blank`
-writes the field blank instead - which is how RINEX records a measurement
-that is not available - and the rest of the epoch as given, and warns once
-per observation code of a system, so that one implausible value does not
-cost the epoch of every other satellite. Either way the value never reaches
-the file, where it would shift the rest of the record.
+`overflow` says what becomes of an observation value or receiver clock
+offset too wide for its field. `:throw` rejects the epoch with an
+`ArgumentError`; `:blank` writes the field blank, as a measurement that is
+not available, and warns once per observation code of a system. An epoch is
+checked whole before any of it is written, so a rejected one leaves the
+file as it was.
 """
 mutable struct RinexObsWriter{T<:IO}
     io::T
@@ -685,7 +649,8 @@ function RinexObsWriter(
 end
 
 # Checked by every constructor before it opens a file, so that a writer it
-# rejects leaves none behind.
+# rejects leaves none behind, and a bad header does not surface from the
+# lazy header write inside `close`.
 function check_writer(header, overflow)
     check_obs_header(header)
     overflow in (:throw, :blank) || throw(
@@ -732,8 +697,6 @@ function with_writer(f, writer)
     result
 end
 
-# Checked when the writer is created, so a header the records cannot hold
-# does not surface from the lazy header write inside `close`.
 function check_obs_header(header::RinexObsHeader)
     # Data lines are matched to the first list of their system, so a second
     # list of a system, or a second entry of a code, would describe columns
@@ -889,10 +852,8 @@ given, and leaves the others as they are:
 
     set_header!(writer; approx_position = position, leap_seconds = 18)
 
-It replaces the header with a changed copy rather than assigning to the one
-the writer was created with, so a header shared with code that keeps reading
-it - the `obs_codes` that place each observation of a [`SatObs`](@ref) - is
-never changed under that code.
+It changes a copy, so the header the writer was created with stays as it
+was for code that keeps reading it.
 """
 function set_header!(writer::RinexObsWriter, header::RinexObsHeader)
     check_header_unwritten(writer)
@@ -1097,15 +1058,9 @@ add_indicator!(record::RecordBuffer, indicator::Int) =
     add_char!(record, Char('0' + indicator))
 
 # An observation field is 14 columns of value plus one column each for the
-# loss-of-lock and signal-strength indicator. A measurement that is not
-# available - `nothing`, or a value that is not finite - leaves the whole
-# field blank, which is what RINEX reads as "no observation"; a finite value
-# too large for its columns is an error rather than a shifted record.
-#
-# The loss-of-lock indicator is defined for carrier phases only (section
-# 6.7.1), so a lost lock flagged on a pseudorange, a Doppler or a signal
-# strength is an error rather than a flag no reader looks for there; a zero
-# is "OK or not known" and stays valid on any of them.
+# loss-of-lock and signal-strength indicator, all blank for a measurement
+# that is not available. A loss-of-lock indicator of zero, "OK or not
+# known", is valid on any observation.
 add_observation!(
     writer::RinexObsWriter,
     record::RecordBuffer,
@@ -1152,13 +1107,10 @@ end
 """
     write_epoch!(writer::RinexObsWriter, epoch::ObsEpoch)
 
-Append one epoch record. Writes the file header first if it has not been
-written yet. The whole epoch is checked before its first line is written, so
-an epoch this rejects leaves the file as it was.
+Append one epoch record, writing the file header first if it has not been
+written yet.
 """
 function write_epoch!(writer::RinexObsWriter, epoch::ObsEpoch)
-    # Assembled whole before it is written, so a rejected epoch leaves the
-    # file as it was.
     record = start_record!(writer.record)
     t, seconds = epoch_minute_seconds(epoch.time, epoch.fractional_second)
     add_char!(record, '>')

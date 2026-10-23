@@ -9,30 +9,23 @@
 The navigation record of a GNSSDecoder `GNSSDecoderState`, for
 [`write_ephemeris!`](@ref). Available with `using GNSSDecoder`.
 
-Records exist for GPS LNAV (L1 C/A), for Galileo I/NAV (E1-B, E5b) and
-F/NAV (E5a), and for BDS D1/D2 (B1I, B3I). The GPS CNAV and CNAV-2 messages
-(L5, L2C, L1C), the BDS B-CNAV messages (B1C, B2a, B2b) and Galileo's E6
-C/NAV broadcast a quasi-Keplerian ephemeris that RINEX 3.05 has no record
-for - it arrived with RINEX 4 - so those decoders give `nothing`, as does a
-decoder whose message is not complete for positioning yet: a partially
-decoded message would write zeros into the record.
-[`has_rinex_ephemeris`](@ref) tells the two apart.
+Records exist for GPS LNAV (L1 C/A), Galileo I/NAV (E1-B, E5b) and F/NAV
+(E5a), and BDS D1/D2 (B1I, B3I). The GPS CNAV and CNAV-2 (L5, L2C, L1C),
+BDS B-CNAV (B1C, B2a, B2b) and Galileo C/NAV (E6) messages have no RINEX
+3.05 record (it arrived with RINEX 4), so those decoders give `nothing`, as
+does a message not yet complete for positioning; [`has_rinex_ephemeris`](@ref)
+tells the two apart.
 
-`week` is the continuous week of the message on its constellation's own
-count - the GPS week, the Galileo (GST) week, the BDT week - which is what
-`PositionVelocityTime.get_week` returns. Galileo and BDS broadcast all of
-it, so it defaults to the decoded one. GPS LNAV broadcasts it in 10 bits,
-which leaves the 1024-week cycle to the caller, so a GPS decoder needs it
-given.
+`week` is the continuous week on the constellation's own count (the GPS,
+GST or BDT week), as `PositionVelocityTime.get_week` returns it. It defaults
+to the decoded one for Galileo and BDS; GPS LNAV broadcasts only 10 bits of
+it, so a GPS decoder needs it given.
 
 The decoded values are converted to the record's units and conventions:
-the issue-of-data and health words to their numbers, the accuracy indices
-to meters (IS-GPS-200 Table 20-I, Galileo OS SIS ICD Table 92), the
-broadcast fit-interval flag to hours, the Galileo health and data-validity
-status to the bit fields of [`galileo_sv_health`](@ref) and
-[`galileo_data_sources`](@ref), and the times by
-[`navigation_times`](@ref). Angles pass through: the decoders hold them in
-radians already.
+issue-of-data and health words, accuracy indices to meters, the fit-interval
+flag to hours, the Galileo status to [`galileo_sv_health`](@ref) and
+[`galileo_data_sources`](@ref), and the times by [`navigation_times`](@ref).
+Angles are in radians already and pass through.
 """
 function rinex_ephemeris end
 
@@ -40,13 +33,10 @@ function rinex_ephemeris end
     has_rinex_ephemeris(decoder) -> Bool
 
 Whether RINEX 3.05 has a navigation record for the message a GNSSDecoder
-`GNSSDecoderState` decodes: GPS LNAV, Galileo I/NAV and F/NAV, and BDS
-D1/D2. Available with `using GNSSDecoder`.
-
-It depends on the message only, not on how much of it has been decoded, so
-it tells the two reasons [`rinex_ephemeris`](@ref) gives `nothing` for apart:
-a message that is not complete yet will have a record, while one this is
-`false` for - the CNAV, CNAV-2, B-CNAV and C/NAV messages - never will.
+`GNSSDecoderState` decodes, however much of it is decoded yet. Available with
+`using GNSSDecoder`. A message this is `true` for gets its record from
+[`rinex_ephemeris`](@ref) once it is complete; one it is `false` for never
+does.
 """
 function has_rinex_ephemeris end
 

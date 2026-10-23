@@ -1,6 +1,8 @@
 # Fortran-style fixed-width formatting shared by the obs and nav writers.
 # RINEX 3 records are column-oriented: header lines carry 60 columns of
 # content followed by the record label; data fields use fixed F/D widths.
+# A value wider than its field would shift every field after it, which a
+# fixed-column reader cannot detect, so the checks below reject it instead.
 
 const FMT_F14_3 = Printf.Format("%14.3f")
 const FMT_F14_4 = Printf.Format("%14.4f")
@@ -22,12 +24,10 @@ const RECORD_FORMATS = (FMT_F14_3, FMT_F11_7, FMT_F15_12, FMT_E19_12)
 """
     RecordBuffer()
 
-Scratch buffer of one data record. `Printf` renders a field into a byte
-buffer without allocating, while its `IO` method allocates a worst-case
-buffer per field (464 bytes for an `F14.3`), so the data writers - which
-run per epoch and per ephemeris - assemble each record here and hand the
-finished line to the IO in a single write. Header records are written
-straight to the IO instead; they happen once per file.
+Scratch buffer of one data record. `Printf` writes into a byte buffer
+without allocating, but its `IO` method allocates per field, so the data
+writers assemble each record here and write it in one call. Header
+records, written once per file, go straight to the IO.
 """
 mutable struct RecordBuffer
     bytes::Vector{UInt8}
@@ -35,13 +35,10 @@ mutable struct RecordBuffer
 end
 RecordBuffer() = RecordBuffer(Vector{UInt8}(undef, 512), 1)
 
-# Room `Printf` may need for one field, whatever value it is handed: an `%f`
-# conversion renders the 309 integer digits of the largest `Float64` ahead
-# of its decimals, far past the columns the field occupies in a valid
-# record. Reserved before every field, so that a value the writers do not
-# range-check cannot write past the end of the buffer - and measured from
-# the formats in use rather than assumed, so that a wider format added to
-# `RECORD_FORMATS` grows the reserve with it.
+# Room `Printf` may need for one field of any value (`%f` renders all 309
+# integer digits of `floatmax`), reserved before every field so an unchecked
+# value cannot write past the buffer. Measured from `RECORD_FORMATS`, so a
+# wider format grows it.
 const MAX_FIELD_WIDTH = maximum(
     length(Printf.format(format, value)) for format in RECORD_FORMATS,
     value in (floatmax(Float64), -floatmax(Float64), 5.0e-324, -5.0e-324, NaN, -Inf)
@@ -72,9 +69,8 @@ end
 """
     add_integer!(record, value, width, pad = ' ')
 
-Append the non-negative integer `value` right-aligned in `width` columns.
-A value of more columns than the field holds is rejected rather than
-shifting the rest of the record.
+Append the non-negative integer `value` right-aligned in `width` columns,
+rejecting one that does not fit.
 """
 function add_integer!(
     record::RecordBuffer,
@@ -149,10 +145,8 @@ end
     header_line(io, content, label)
 
 Write one RINEX header record: `content` padded to 60 columns followed by
-the record `label` (columns 61-80). Content of more than 60 columns would
-push the label out of the columns a reader looks for it in, which makes the
-record unreadable rather than merely wrong, so it is rejected here as a
-last line of defence behind the per-field checks.
+the record `label` (columns 61-80). Longer content is rejected, as a last
+check behind the per-field ones.
 """
 function header_line(io::IO, content::AbstractString, label::AbstractString)
     length(content) <= 60 || throw(
@@ -168,10 +162,7 @@ end
     check_header_field(value, width, description) -> String
 
 Return the header field `value`, or throw an `ArgumentError` if it is wider
-than the `width` columns the record gives it. A header field is written at
-a fixed offset, so a value of more columns than its own does not extend the
-record: it overwrites the field that follows it, or pushes the record label
-out of columns 61-80.
+than the `width` columns the record gives it.
 """
 check_header_field(value::AbstractString, width::Int, description) =
     length(value) <= width ? value :
@@ -249,12 +240,8 @@ satellite system characters, or those of the `obs_codes` of `header` - as the
 three-letter code of the `TIME OF FIRST OBS` record: `"GPS"`, `"GLO"`,
 `"GAL"`, `"BDT"`, `"QZS"` or `"IRN"`. A single-constellation file is written
 in that constellation's time system; a file carrying several constellations
-uses GPS time, as RINEX prescribes for mixed files.
-
-Every epoch passed to [`write_epoch!`](@ref) has to be in this time system,
-so a writer of observations asks for it rather than deciding it again:
-
-    time_system(header)  # "GPS" for a mixed file
+uses GPS time, as RINEX prescribes for mixed files. Every epoch passed to
+[`write_epoch!`](@ref) has to be in this time system.
 
 With GNSSSignals loaded, `time_system(GNSSSignals.BDT())` gives the code of a
 GNSSSignals time system - `"GPS"`, `"GAL"` or `"BDT"` - and
@@ -285,8 +272,7 @@ satellite_id(system::Char, prn::Integer) = string(system, lpad(prn, 2, '0'))
     check_satellite_number(system, prn) -> Int
 
 Return the satellite number `prn`, or throw an `ArgumentError` if it is
-outside 1-99: it would not fit the two columns of a satellite
-identification and shift the whole record.
+outside the 1-99 of the two columns of a satellite identification.
 """
 check_satellite_number(system::Char, prn::Integer) =
     0 < prn < 100 ? Int(prn) :
@@ -328,12 +314,9 @@ end
 """
     fits_fixed_field(value, digits, width) -> Bool
 
-Whether `value` rendered with `digits` decimals fits `width` columns. A
-value that does not fit overflows its field and shifts every field behind
-it on the line, which a fixed-column parser cannot detect - so the writers
-reject it instead of corrupting the record. `NaN` and `Inf` do not fit
-either: they render in the right width, and a parser reads them back as a
-measurement that was never made.
+Whether `value` rendered with `digits` decimals fits `width` columns. `NaN`
+and `Inf` do not: they render in the right width, but a reader takes them
+for a measurement.
 """
 function fits_fixed_field(value::Float64, digits::Int, width::Int)
     # Rounding is what reaches the file, so 9999999999.9996 counts as the
@@ -347,13 +330,10 @@ end
     fits_scientific_field(value, digits, width) -> Bool
 
 Whether `value` rendered in `E` notation with `digits` decimals fits `width`
-columns: a sign if the value is negative, the leading digit, the point, the
-decimals, `E`, the exponent sign and the two exponent digits `Printf` writes
-even for a one-digit exponent. RINEX section 6.8 gives the exponent two
-digits, so a value needing three does not fit whatever its width: `1e-100`
-would occupy the 19 columns of an `E19.12` field, but as `1.000000000000E-100`
-it is not the number a reader of the format recovers. `NaN` and `Inf` do not
-fit either, for the reason given at [`fits_fixed_field`](@ref).
+columns: sign, leading digit, point, decimals, `E` and a signed two-digit
+exponent. RINEX section 6.8 gives the exponent two digits, so a value
+needing three, such as `1e-100`, never fits. Nor do `NaN` and `Inf`, as for
+[`fits_fixed_field`](@ref).
 """
 function fits_scientific_field(value::Float64, digits::Int, width::Int)
     isfinite(value) || return false
@@ -387,15 +367,12 @@ The `LEAP SECONDS` header record. `count` is the current number of leap
 seconds; `future_count` (ΔtLSF), `week` (WN_LSF) and `day` (DN) describe the
 leap-second event the message announces, which some parsers require.
 
-`time_system` says which system the week and day number count in: `"GPS"`
-counts weeks from 1980-01-06 and days 1-7, `"BDT"` from 2006-01-01 and days
-0-6. Only those two are valid identifiers, and the default `""` leaves the
-field blank, which a reader takes as `"GPS"` - so a BeiDou file giving
-BDT-relative values has to say `"BDT"`, or its numbers are read as GPS ones.
+`time_system` is what the week and day count in: `"GPS"` (weeks from
+1980-01-06, days 1-7) or `"BDT"` (weeks from 2006-01-01, days 0-6). The
+default `""` leaves the field blank, which a reader takes as `"GPS"`.
 
-A plain `Int` or an `NTuple{4,Int}` converts to this type, so
-`leap_seconds = 18` and `leap_seconds = (18, 18, 2185, 7)` keep working
-wherever a header takes one.
+A header also takes a plain `Int` or an `NTuple{4,Int}`: `leap_seconds = 18`
+or `leap_seconds = (18, 18, 2185, 7)`.
 """
 struct LeapSeconds
     count::Int
@@ -457,9 +434,8 @@ leap_seconds_content(leap_seconds::LeapSeconds) =
 
 The minute of a record epoch and the seconds within it, including the
 sub-millisecond `fractional_second` that `DateTime` cannot carry. The
-seconds are rounded to the seven decimals their field holds first, so that
-an epoch a fraction short of the next minute is written as that minute
-rather than as second 60, and one a fraction before its own as the minute
+seconds are rounded to their seven decimals first, so seconds that round to
+60 carry into the next minute, and negative ones borrow from the minute
 before.
 """
 function epoch_minute_seconds(time::DateTime, fractional_second)
