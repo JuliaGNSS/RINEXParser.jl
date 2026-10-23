@@ -97,6 +97,42 @@ the system of a record of the [Ephemeris interface](@ref).
 """
 satellite_system(signal)
 
+const OBSERVATION_TYPES = ('C', 'L', 'D', 'S')
+
+"""
+    observation_codes(signals; types = ('C', 'L', 'D', 'S'))
+        -> Vector{Pair{Char,Vector{String}}}
+
+The `obs_codes` of a [`RinexObsHeader`](@ref) for the GNSSSignals
+`signals`: per satellite system, in order of first appearance, the
+[`observation_code`](@ref) of each of `types` for each of its signals.
+Available with `using GNSSSignals`.
+
+    observation_codes([GPSL1CA(), GalileoE1B(), GPSL5Q()])
+    # ['G' => ["C1C", "L1C", "D1C", "S1C", "C5Q", "L5Q", "D5Q", "S5Q"],
+    #  'E' => ["C1B", "L1B", "D1B", "S1B"]]
+
+A code is declared once, so signals that share one - the Galileo E1
+signals approximated as BOC(1,1) and their CBOC originals - give it once.
+"""
+function observation_codes(signals; types = OBSERVATION_TYPES)
+    obs_codes = Pair{Char,Vector{String}}[]
+    for signal in signals
+        system = satellite_system(signal)
+        index = findfirst(entry -> first(entry) == system, obs_codes)
+        if isnothing(index)
+            push!(obs_codes, system => String[])
+            index = lastindex(obs_codes)
+        end
+        codes = last(obs_codes[index])
+        for type in types
+            code = observation_code(type, signal)
+            code in codes || push!(codes, code)
+        end
+    end
+    obs_codes
+end
+
 """
     gnss_time_system(time_system) -> GNSSSignals.TimeSystem
 

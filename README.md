@@ -114,7 +114,8 @@ end
   `set_header!(writer, header)` until the first ephemeris is written, for
   ionosphere and UTC parameters that decode later.
 - `satellite_system = 'G'` pins the file to one constellation; without it the
-  file is mixed.
+  file is mixed. `nav_satellite_system(systems)` gives the one for a file of
+  `systems`.
 - A value that does not fit its field, or is not finite, is rejected; a
   writer created with `overflow = :skip` leaves the record out instead.
 - Other constellations can be written by implementing the
@@ -142,8 +143,10 @@ end
 ```
 
 With GNSSSignals.jl loaded, `observation_code('L', BeiDouB1I()) == "L2I"`
-names the observables of a signal, and `gnss_time_system(time_system(header))`
-gives the GNSSSignals time system of a file's epochs.
+names the observables of a signal, `observation_codes(signals)` the
+`obs_codes` of a header for them, and `gnss_time_system(time_system(header))`
+gives the GNSSSignals time system of a file's epochs; `epoch_time` takes it
+too.
 
 ## File names
 

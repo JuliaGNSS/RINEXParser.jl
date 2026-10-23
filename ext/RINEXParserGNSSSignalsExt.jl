@@ -2,7 +2,9 @@ module RINEXParserGNSSSignalsExt
 
 using GNSSSignals: AbstractGNSSSignal, TimeSystem, get_constellation_id, get_signal_id
 using GNSSSignals: GNSSSignals
-import RINEXParser: observation_code, satellite_system, time_system, gnss_time_system
+import RINEXParser:
+    observation_code, satellite_system, time_system, gnss_time_system, epoch_time
+using RINEXParser: OBSERVATION_TYPES
 
 # RINEX satellite system character per GNSSSignals constellation.
 const SYSTEM_CHARACTERS = Dict(:GPS => 'G', :Galileo => 'E', :BeiDou => 'C')
@@ -51,8 +53,6 @@ const UNCODED_SIGNALS = Dict(
         "Galileo E5a-QP is new in OS SIS ICD Issue 2.2, published after RINEX " *
         "3.05, whose Galileo codes (Table 16) cover only E5a I, Q and I+Q",
 )
-
-const OBSERVATION_TYPES = ('C', 'L', 'D', 'S')
 
 function satellite_system(signal::AbstractGNSSSignal)
     constellation = get_constellation_id(signal)
@@ -117,5 +117,8 @@ function time_system(system::TimeSystem)
     end
     throw(ArgumentError("The time system $system has no RINEX time-system code here"))
 end
+
+epoch_time(system::TimeSystem; week::Integer, time_of_week::Real) =
+    epoch_time(time_system(system); week, time_of_week)
 
 end # module RINEXParserGNSSSignalsExt

@@ -35,7 +35,8 @@ const WEEK_SYSTEMS = Dict("GPS" => 'G', "GAL" => 'E', "BDT" => 'C')
 
 The `time` and `fractional_second` of an [`ObsEpoch`](@ref) at `week` and
 `time_of_week` [s] of `time_system`: `"GPS"`, `"GAL"` or `"BDT"`, the
-[`time_system`](@ref) of the file. `week` is on that time system's own count
+[`time_system`](@ref) of the file, or with `using GNSSSignals` its
+GNSSSignals time system, `GPST()`, `GST()` or `BDT()`. `week` is on that time system's own count
 (the GPS, GST or BDT week), and the calendar time is in `time_system`: a BDT
 epoch reads 14 s behind the GPS one of the same instant.
 
