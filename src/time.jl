@@ -1,5 +1,5 @@
-# The week counts of the navigation records, and the calendar times they
-# make: what a broadcast message's week and seconds of week become in a
+# The week counts of the navigation records and observation epochs, and the
+# calendar times they make: what a week and seconds of week become in a
 # RINEX 3.05 record.
 
 const SECONDS_PER_WEEK = 604800
@@ -24,6 +24,52 @@ function record_week(system::Char, week::Integer)
             "The navigation record times are known for GPS ('G'), Galileo ('E') and " *
             "BDS ('C'), not for system '$system'",
         ),
+    )
+end
+
+# The constellation whose week a time system of an observation file counts.
+const WEEK_SYSTEMS = Dict("GPS" => 'G', "GAL" => 'E', "BDT" => 'C')
+
+"""
+    epoch_time(time_system; week, time_of_week) -> (; time, fractional_second)
+
+The `time` and `fractional_second` of an [`ObsEpoch`](@ref) at `week` and
+`time_of_week` [s] of `time_system` - `"GPS"`, `"GAL"` or `"BDT"`, the
+[`time_system`](@ref) of the file. `week` is the continuous week on the count
+of that time system's own constellation, as [`navigation_times`](@ref) takes
+it: the GPS week, the Galileo (GST) week, the BDT week. The calendar time is
+in `time_system` - a BDT epoch reads 14 s behind the GPS one of the same
+instant.
+
+    t = epoch_time("GPS"; week = 2124, time_of_week = 345600.25)
+    ObsEpoch(t.time, satellites; t.fractional_second)
+
+A `time_of_week` outside the week is taken on the count of `week`: negative
+in the week before, past its end in the week after, so a time of week moved
+into another time system needs no rollover of its own. Both parts are exact
+to the precision of `time_of_week`: the week and the whole milliseconds go
+into the `DateTime`, and only the rest of the millisecond into
+`fractional_second`.
+"""
+function epoch_time(time_system::AbstractString; week::Integer, time_of_week::Real)
+    system = get(WEEK_SYSTEMS, time_system, nothing)
+    isnothing(system) && throw(
+        ArgumentError(
+            "The epoch times are known for the time systems " *
+            join(sort!(collect(keys(WEEK_SYSTEMS))), ", ") *
+            ", not for \"$time_system\"",
+        ),
+    )
+    record, origin = record_week(system, week)
+    whole_seconds = floor(Int, time_of_week)
+    fraction = time_of_week - whole_seconds
+    whole_milliseconds = floor(Int, fraction * 1000)
+    (;
+        time = origin +
+               Week(record) +
+               Second(whole_seconds) +
+               Millisecond(whole_milliseconds),
+        fractional_second = Float64(fraction - whole_milliseconds / 1000),
     )
 end
 

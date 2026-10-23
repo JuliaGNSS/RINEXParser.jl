@@ -255,6 +255,10 @@ Every epoch passed to [`write_epoch!`](@ref) has to be in this time system,
 so a writer of observations asks for it rather than deciding it again:
 
     time_system(header)  # "GPS" for a mixed file
+
+With GNSSSignals loaded, `time_system(GNSSSignals.BDT())` gives the code of a
+GNSSSignals time system - `"GPS"`, `"GAL"` or `"BDT"` - and
+[`gnss_time_system`](@ref) the time system of a code.
 """
 function time_system(systems)
     length(systems) == 1 || return "GPS"

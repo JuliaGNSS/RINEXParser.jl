@@ -1,7 +1,8 @@
 module RINEXParserGNSSSignalsExt
 
-using GNSSSignals: AbstractGNSSSignal, get_constellation_id, get_signal_id
-import RINEXParser: observation_code, satellite_system
+using GNSSSignals: AbstractGNSSSignal, TimeSystem, get_constellation_id, get_signal_id
+using GNSSSignals: GNSSSignals
+import RINEXParser: observation_code, satellite_system, time_system, gnss_time_system
 
 # RINEX satellite system character per GNSSSignals constellation.
 const SYSTEM_CHARACTERS = Dict(:GPS => 'G', :Galileo => 'E', :BeiDou => 'C')
@@ -87,6 +88,34 @@ function observation_code(type::Char, signal::AbstractGNSSSignal)
         ),
     )
     type * code
+end
+
+# The GNSSSignals time system of each RINEX time-system code.
+const TIME_SYSTEMS = Dict(
+    "GPS" => GNSSSignals.GPST(),
+    "GAL" => GNSSSignals.GST(),
+    "BDT" => GNSSSignals.BDT(),
+)
+
+function gnss_time_system(code::AbstractString)
+    get(TIME_SYSTEMS, code) do
+        throw(
+            ArgumentError(
+                "GNSSSignals has no time system for the RINEX time system \"$code\"; " *
+                "the ones it has are " *
+                join(sort!(collect(keys(TIME_SYSTEMS))), ", "),
+            ),
+        )
+    end
+end
+# Satellite systems or a header: the time system of their epochs.
+gnss_time_system(systems) = gnss_time_system(time_system(systems))
+
+function time_system(system::TimeSystem)
+    for (code, candidate) in TIME_SYSTEMS
+        candidate == system && return code
+    end
+    throw(ArgumentError("The time system $system has no RINEX time-system code here"))
 end
 
 end # module RINEXParserGNSSSignalsExt

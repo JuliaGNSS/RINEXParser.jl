@@ -16,6 +16,7 @@ C/NAV broadcast a quasi-Keplerian ephemeris that RINEX 3.05 has no record
 for - it arrived with RINEX 4 - so those decoders give `nothing`, as does a
 decoder whose message is not complete for positioning yet: a partially
 decoded message would write zeros into the record.
+[`has_rinex_ephemeris`](@ref) tells the two apart.
 
 `week` is the continuous week of the message on its constellation's own
 count - the GPS week, the Galileo (GST) week, the BDT week - which is what
@@ -34,6 +35,20 @@ status to the bit fields of [`galileo_sv_health`](@ref) and
 radians already.
 """
 function rinex_ephemeris end
+
+"""
+    has_rinex_ephemeris(decoder) -> Bool
+
+Whether RINEX 3.05 has a navigation record for the message a GNSSDecoder
+`GNSSDecoderState` decodes: GPS LNAV, Galileo I/NAV and F/NAV, and BDS
+D1/D2. Available with `using GNSSDecoder`.
+
+It depends on the message only, not on how much of it has been decoded, so
+it tells the two reasons [`rinex_ephemeris`](@ref) gives `nothing` for apart:
+a message that is not complete yet will have a record, while one this is
+`false` for - the CNAV, CNAV-2, B-CNAV and C/NAV messages - never will.
+"""
+function has_rinex_ephemeris end
 
 """
     add_header_records!(header::RinexNavHeader, decoder; week = nothing) -> header
@@ -91,3 +106,18 @@ The RINEX satellite system character of a GNSSSignals `signal`: `'G'`,
 the system of a record of the [Ephemeris interface](@ref).
 """
 satellite_system(signal)
+
+"""
+    gnss_time_system(time_system) -> GNSSSignals.TimeSystem
+
+The GNSSSignals time system - `GPST()`, `GST()` or `BDT()` - of a RINEX
+time-system code `"GPS"`, `"GAL"` or `"BDT"`, or of the epochs of an
+observation file of satellite systems or a header, as
+[`time_system`](@ref) names them. Available with `using GNSSSignals`.
+
+    gnss_time_system(time_system(header))  # BDT() for a BDS-only file
+
+A code GNSSSignals has no time system for is rejected with an
+`ArgumentError`.
+"""
+function gnss_time_system end
