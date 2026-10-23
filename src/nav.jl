@@ -405,7 +405,7 @@ record_contents(eph, ignored::Tuple{Vararg{Symbol}}) = (
 )
 
 """
-    RinexNavWriter(target, header::RinexNavHeader)
+    RinexNavWriter(target, header::RinexNavHeader = RinexNavHeader(); overflow = :throw)
 
 Streaming writer for a RINEX 3.05 navigation file. `target` is a path, an
 `IO`, or a [`RinexDirectory`](@ref) that names the file by the long
@@ -417,6 +417,15 @@ BeiDou the ages of the data - is skipped, so it is safe to forward every
 decoded subframe; one whose health, accuracy or any other value changed
 under the same issue of data is a new record, as section 5.4.3 asks. Close
 the writer (or use the do-block form) to flush the file.
+
+`overflow` says what becomes of an ephemeris with a value that does not fit
+its E19.12 field, or is not finite - which a navigation record, unlike an
+observation, has no blank encoding for. `:throw` rejects it with an
+`ArgumentError`. `:skip` leaves the record out, makes
+[`write_ephemeris!`](@ref) return `false`, and warns once per record, so
+that a receiver forwarding every decoded message keeps its output when one
+message was decoded wrong. Either way the file stays as it was: the whole
+record is checked before its first line is written.
 """
 mutable struct RinexNavWriter{T<:IO}
     io::T
@@ -425,6 +434,10 @@ mutable struct RinexNavWriter{T<:IO}
     owns_io::Bool
     # Keys come from `dedupe_key`, whose shape differs per ephemeris type.
     written::Set{Tuple}
+    overflow::Symbol
+    # The `dedupe_key`s of the records `overflow = :skip` left out, so that
+    # each is warned about once however often it is offered again.
+    skipped::Set{Tuple}
     record::RecordBuffer
     # As in `RinexObsWriter`.
     path::Union{Nothing,String}
@@ -433,33 +446,47 @@ mutable struct RinexNavWriter{T<:IO}
     # another start time is named after.
     first_toc::Union{Nothing,DateTime}
 end
-function RinexNavWriter(io::IO, header::RinexNavHeader = RinexNavHeader())
-    check_nav_header(header)
-    nav_writer(io, header, false, nothing, nothing)
+function RinexNavWriter(
+    io::IO,
+    header::RinexNavHeader = RinexNavHeader();
+    overflow::Symbol = :throw,
+)
+    check_nav_writer(header, overflow)
+    nav_writer(io, header, overflow, false, nothing, nothing)
 end
-function RinexNavWriter(path::AbstractString, header::RinexNavHeader = RinexNavHeader())
-    check_nav_header(header)
-    nav_writer(open(path, "w"), header, true, String(path), nothing)
+function RinexNavWriter(
+    path::AbstractString,
+    header::RinexNavHeader = RinexNavHeader();
+    overflow::Symbol = :throw,
+)
+    check_nav_writer(header, overflow)
+    nav_writer(open(path, "w"), header, overflow, true, String(path), nothing)
 end
-function RinexNavWriter(target::RinexDirectory, header::RinexNavHeader = RinexNavHeader())
+function RinexNavWriter(
+    target::RinexDirectory,
+    header::RinexNavHeader = RinexNavHeader();
+    overflow::Symbol = :throw,
+)
     (isnothing(target.session) || target.session isa RinexObsWriter) || throw(
         ArgumentError(
             "The session of a navigation file is the RinexObsWriter of its " *
             "observations, not a $(typeof(target.session))",
         ),
     )
-    check_nav_header(header)
+    check_nav_writer(header, overflow)
     # Checked now rather than when the name is needed on `close`.
     file_name(header, target; fallback = DateTime(2000))
     path, io = open_temporary(target)
-    nav_writer(io, header, true, path, target)
+    nav_writer(io, header, overflow, true, path, target)
 end
 
-nav_writer(io, header, owns_io, path, directory) = RinexNavWriter(
+nav_writer(io, header, overflow, owns_io, path, directory) = RinexNavWriter(
     io,
     header,
     false,
     owns_io,
+    Set{Tuple}(),
+    overflow,
     Set{Tuple}(),
     RecordBuffer(),
     path,
@@ -467,8 +494,25 @@ nav_writer(io, header, owns_io, path, directory) = RinexNavWriter(
     nothing,
 )
 
-RinexNavWriter(f::Function, target, header::RinexNavHeader = RinexNavHeader()) =
-    with_writer(f, RinexNavWriter(target, header))
+RinexNavWriter(
+    f::Function,
+    target,
+    header::RinexNavHeader = RinexNavHeader();
+    keywords...,
+) = with_writer(f, RinexNavWriter(target, header; keywords...))
+
+# Checked by every constructor before it opens a file, so that a writer it
+# rejects leaves none behind.
+function check_nav_writer(header, overflow)
+    check_nav_header(header)
+    overflow in (:throw, :skip) || throw(
+        ArgumentError(
+            "overflow is :throw to reject an ephemeris with a value that does not fit " *
+            "its field or :skip to leave the record out, not :$overflow",
+        ),
+    )
+    nothing
+end
 
 # Checked when the writer is created, not only when the header is written
 # out: the lazy header write happens inside `close`, where an exception
@@ -555,13 +599,10 @@ end
 # "not available", so a value that is not finite can only be an upstream bug
 # and is rejected instead of written as "NaN" into a numeric field. Only a
 # spare - `nothing` - is blank, and it is the one thing not checked.
-function add_orbit_values!(
-    record::RecordBuffer,
-    system::Char,
-    prn::Integer,
-    line_number::Int,
-    values,
-)
+#
+# Returns `nothing`, or the `(line_number, field, value)` of the first value
+# that does not fit, for `write_ephemeris!` to reject or skip the record by.
+function add_orbit_values!(record::RecordBuffer, line_number::Int, values)
     # Counters and bit fields are integers, written as the floats of every
     # other field of the record.
     for (i, value) in enumerate(map(orbit_value, values))
@@ -573,17 +614,17 @@ function add_orbit_values!(
             add_blanks!(record, 19)
             continue
         end
-        fits_scientific_field(value, 12, 19) ||
-            ephemeris_field_error(system, prn, line_number, i, value)
+        fits_scientific_field(value, 12, 19) || return (line_number, i, value)
         add_field!(record, FMT_E19_12, value)
     end
+    nothing
 end
 
 orbit_value(::Nothing) = nothing
 orbit_value(value::Real) = Float64(value)
 
 # Line 0 is the clock polynomial at the end of the record epoch line.
-@noinline function ephemeris_field_error(system, prn, line_number, i, value)
+function ephemeris_field_problem(system, prn, (line_number, i, value))
     position =
         line_number == 0 ? "the clock polynomial" : "broadcast orbit line $line_number"
     reason =
@@ -592,24 +633,24 @@ orbit_value(value::Real) = Float64(value)
         "would be shifted out of alignment" :
         "is not finite, and a navigation record field has no encoding for a value " *
         "that is missing"
-    throw(
-        ArgumentError(
-            "Field $i of $position of the ephemeris of satellite " *
-            "$(satellite_id(system, prn)) is $value, which $reason",
-        ),
-    )
+    "Field $i of $position of the ephemeris of satellite " *
+    "$(satellite_id(system, prn)) is $value, which $reason"
 end
 
-function broadcast_orbit_line(
-    record::RecordBuffer,
-    system::Char,
-    prn::Integer,
-    line_number::Int,
-    values,
-)
+function broadcast_orbit_line(record::RecordBuffer, line_number::Int, values)
     add_blanks!(record, 4)
-    add_orbit_values!(record, system, prn, line_number, values)
+    problem = add_orbit_values!(record, line_number, values)
     end_line!(record)
+    problem
+end
+
+# Reject the record, or with `overflow = :skip` leave it out and say so once.
+@noinline function reject_ephemeris(writer::RinexNavWriter, key, system, prn, field)
+    problem = ephemeris_field_problem(system, prn, field)
+    writer.overflow == :skip || throw(ArgumentError(problem))
+    push!(writer.skipped, key)
+    @warn "$problem, so the record is left out of the file"
+    false
 end
 
 """
@@ -617,8 +658,9 @@ end
 
 Append one ephemeris record ([`GPSEphemeris`](@ref),
 [`GalileoEphemeris`](@ref) or [`BeiDouEphemeris`](@ref)), writing the file
-header first if necessary. Returns whether the record was written (`false`
-for an ephemeris that was already written before). Throws an
+header first if necessary. Returns whether the record was written: `false`
+for an ephemeris that was already written before, and for one the writer's
+`overflow = :skip` left out (see [`RinexNavWriter`](@ref)). Throws an
 `ArgumentError` if the header pins the file to a single constellation and
 `eph` belongs to another one.
 
@@ -653,7 +695,7 @@ function write_ephemeris!(writer::RinexNavWriter, eph)
             ),
         )
     key = dedupe_key(eph)
-    key in writer.written && return false
+    (key in writer.written || key in writer.skipped) && return false
     sys = satellite_system(eph)
     prn = eph.prn
     t = eph.toc
@@ -672,11 +714,13 @@ function write_ephemeris!(writer::RinexNavWriter, eph)
     add_epoch_date!(record, t)
     add_char!(record, ' ')
     add_integer!(record, second(t), 2, UInt8('0'))
-    add_orbit_values!(record, sys, prn, 0, clock_coefficients(eph))
+    problem = add_orbit_values!(record, 0, clock_coefficients(eph))
     end_line!(record)
     for (line_number, line) in enumerate(orbit_lines(eph))
-        broadcast_orbit_line(record, sys, prn, line_number, line)
+        isnothing(problem) || break
+        problem = broadcast_orbit_line(record, line_number, line)
     end
+    isnothing(problem) || return reject_ephemeris(writer, key, sys, prn, problem)
     writer.header_written || write_nav_header(writer)
     flush_record!(writer.io, record)
     push!(writer.written, key)

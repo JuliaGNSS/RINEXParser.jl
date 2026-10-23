@@ -201,3 +201,26 @@ end
     @test nav.header.leap_seconds == LeapSeconds(18)
     close(nav)
 end
+
+@testset "an ephemeris that does not fit its fields can be left out" begin
+    @test_throws ArgumentError RinexNavWriter(IOBuffer(); overflow = :blank)
+    bad = modify(gps_eph; af1 = NaN)
+    @test_throws ArgumentError write_ephemeris!(RinexNavWriter(IOBuffer()), bad)
+
+    io = IOBuffer()
+    RinexNavWriter(io; overflow = :skip) do writer
+        # Warned about once, however often the record is offered again.
+        @test !(@test_logs (:warn, r"G13 is NaN.*left out") write_ephemeris!(writer, bad))
+        @test !(@test_logs write_ephemeris!(writer, bad))
+        @test write_ephemeris!(writer, gps_eph)
+        # Only the values are checked this way; the record epoch and the
+        # constellation of a pinned header are still errors of the caller.
+        @test_throws ArgumentError write_ephemeris!(
+            writer,
+            modify(gps_eph; toc = DateTime(2020, 1, 1, 2, 0, 0, 500)),
+        )
+    end
+    body = body_lines(readlines(seekstart(io)))
+    @test length(body) == 8
+    @test startswith(body[1], "G13 2020 01 01 02 00 00")
+end
