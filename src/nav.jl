@@ -108,7 +108,8 @@ end
 Header of a RINEX 3.05 navigation file. The corrections and leap seconds
 are decoded from the navigation message, so they may become available only
 after the writer is created. [`set_header!`](@ref) completes or replaces it
-any time before the first [`write_ephemeris!`](@ref) call writes it out.
+any time before the first [`write_ephemeris!`](@ref) call writes it out, and
+[`add_header_records!`](@ref) collects them from decoded navigation messages.
 
 `satellite_system` is the system character of a single-constellation file
 (e.g. `'G'`); leave it as `nothing` for a mixed navigation file that may

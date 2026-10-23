@@ -3,6 +3,9 @@ using Dates
 using Printf
 using RINEXParser
 using Aqua
+using GNSSDecoder
+using GNSSSignals
+using InteractiveUtils: subtypes
 
 include("helpers.jl")
 
@@ -16,4 +19,5 @@ include("helpers.jl")
     include("filename.jl")
     include("writers.jl")
     include("time.jl")
+    include("extensions.jl")
 end

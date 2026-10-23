@@ -15,7 +15,9 @@ RTKLIB's `rinex.c` (a standalone format library) combined with GNSS-SDR's
 runtime model (headers are written lazily on the first record, observation
 epochs stream as they happen, ephemerides are written event-driven and
 deduplicated). Output has been cross-validated against RTKLIB's RINEX
-reader.
+reader. Package extensions convert the navigation messages of GNSSDecoder.jl
+and the signals of GNSSSignals.jl into these records when those packages are
+loaded; the core depends on the standard library only.
 
 GPS, Galileo and BeiDou are implemented (matching the constellations
 supported by GNSSSignals.jl); the record types carry the satellite-system
@@ -244,6 +246,34 @@ not modelled yet can be written by implementing the ephemeris interface -
 and optionally `RINEXParser.clock_coefficients`, see
 `?write_ephemeris!`. Records must also expose `prn` and `toc` fields. See the
 [ephemeris interface](docs/src/ephemeris_interface.md) for the full contract.
+
+## From GNSSDecoder and GNSSSignals
+
+With GNSSDecoder.jl loaded, `rinex_ephemeris(decoder; week)` converts a
+decoded navigation message into its record - `nothing` for a message that is
+not complete, or one RINEX 3.05 has no record for, such as GPS CNAV - and
+`add_header_records!(header, decoder; week)` collects the ionospheric and
+time-system corrections and the leap seconds it carries. `week` is the
+continuous week on the constellation's own count, which
+`PositionVelocityTime.get_week` gives; GPS LNAV broadcasts only 10 bits of
+it, so a GPS decoder needs it given.
+
+```julia
+header = RinexNavHeader(; satellite_system = 'G')
+RinexNavWriter("data.nav"; overflow = :skip) do writer
+    for decoder in decoders
+        week = get_week(decoder; approximate_year = 2026)
+        add_header_records!(header, decoder; week)
+        header_written(writer) || set_header!(writer, header)
+        eph = rinex_ephemeris(decoder; week)
+        isnothing(eph) || write_ephemeris!(writer, eph)
+    end
+end
+```
+
+With GNSSSignals.jl loaded, `observation_code(type, signal)` names the
+observable of a signal - `observation_code('L', BeiDouB1I()) == "L2I"` - and
+`RINEXParser.satellite_system(signal)` its constellation.
 
 ## File names
 

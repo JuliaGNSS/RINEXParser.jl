@@ -16,5 +16,5 @@ jobs:
         run: julia -e 'using Pkg; Pkg.add(PackageSpec(name = "JuliaFormatter", version = "2.8.5"))'
       - name: Check formatting
         run: |
-          julia -e 'using JuliaFormatter; format(["src", "test", "docs/make.jl"])'
+          julia -e 'using JuliaFormatter; format(["src", "ext", "test", "docs/make.jl"])'
           git diff --exit-code

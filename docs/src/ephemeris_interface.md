@@ -34,4 +34,5 @@ built-in types use every field but the transmission time.
 Keep constellation and unit conversions in the adapter. RINEX constellation
 characters and observation codes describe the file format; signal types
 and unit-aware quantities describe the receiver's measurements. An adapter can
-bridge them without adding receiver dependencies to the core writer.
+bridge them without adding receiver dependencies to the core writer, as the
+package extensions for GNSSDecoder and GNSSSignals do.

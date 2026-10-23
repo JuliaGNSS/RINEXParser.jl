@@ -53,4 +53,11 @@ The writer suppresses duplicate records. The type documentation specifies
 units and time conventions for each constellation.
 
 External record types can implement the [Ephemeris interface](@ref).
+
+With GNSSDecoder loaded, [`rinex_ephemeris`](@ref) converts a decoded
+navigation message into its record and [`add_header_records!`](@ref) collects
+the header records it carries; with GNSSSignals loaded,
+[`observation_code`](@ref) names the observables of a signal. A record built
+by hand takes its week, `toc` and transmission time from
+[`navigation_times`](@ref).
 See the [API reference](@ref) for headers, correction records, and writer options.

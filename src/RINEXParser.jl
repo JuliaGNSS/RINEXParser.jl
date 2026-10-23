@@ -21,6 +21,8 @@ export RinexNavHeader,
     write_ephemeris!,
     navigation_times,
     ionosphere_time_mark
+# Methods in the package extensions for GNSSDecoder and GNSSSignals.
+export rinex_ephemeris, add_header_records!, observation_code
 
 const RINEX_VERSION = 3.05
 
@@ -29,6 +31,7 @@ include("directory.jl")
 include("obs.jl")
 include("time.jl")
 include("nav.jl")
+include("extensions.jl")
 # After the headers: the filename is derived from them.
 include("filename.jl")
 
