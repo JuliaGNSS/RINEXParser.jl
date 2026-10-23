@@ -558,8 +558,7 @@ file_path(writer::RinexNavWriter) = writer.path
 function write_nav_header(writer::RinexNavWriter)
     io = writer.io
     header = writer.header
-    # As in the observation header: the fields stay assignable until the
-    # header is written, so they are checked again where they are used.
+    # Checked again, as in `write_obs_header`.
     check_nav_header(header)
     systems = isnothing(header.satellite_system) ? () : (header.satellite_system,)
     version_type_line(io, "N: GNSS NAV DATA", systems)

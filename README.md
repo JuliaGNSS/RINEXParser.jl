@@ -177,7 +177,7 @@ end
 
 Galileo I/NAV and F/NAV ephemerides are written with `GalileoEphemeris`
 (RINEX Table A8: `iodnav`, `data_sources`, `sisa`, `bgd_e5a_e1`,
-`bgd_e5b_e1`, ...); the Klobuchar-style NeQuick coefficients go into an
+`bgd_e5b_e1`, ...); the NeQuick coefficients go into an
 `IonosphericCorrection("GAL", (ai0, ai1, ai2))` header record, whose spare
 fourth field is written blank. The two
 bit fields of that record are assembled by `galileo_data_sources` and
@@ -213,12 +213,10 @@ automatically; set `satellite_system = 'G'` in `RinexNavHeader` for a
 single-system file, which then rejects ephemerides of other
 constellations.
 
-`write_ephemeris!` skips ephemerides it has already written (same
-satellite, issue-of-data, week, time of ephemeris, and for Galileo the
-navigation message source, since I/NAV and F/NAV are separate records; a
-BeiDou record is identified by its reference times instead, since its age
-of data grows while the ephemeris stays the same), so it is safe to forward
-every decoded navigation frame. The nav header is
+`write_ephemeris!` skips an ephemeris whose contents, apart from the
+transmission time (and for BeiDou the ages of data), match a record it has
+already written, so it is safe to forward every decoded navigation frame. A
+change of health or accuracy under the same issue of data is a new record. The nav header is
 also written lazily, and `set_header!(writer, header)` replaces it until the
 first ephemeris is written, which is useful when ionosphere/UTC parameters
 decode later than the first ephemeris.
