@@ -372,13 +372,12 @@ are not known, which writes the record blank.
 first epoch passed to [`write_epoch!`](@ref) and assigned to the header, so
 that [`rinex_filename`](@ref) can name the file from the header afterwards.
 
-The header is mutable, and the writer only reads it when it writes the
-header out on the first epoch, so fields that the data provides late - a
-position solution, the leap seconds decoded from the navigation message -
-can be assigned to `writer.header` any time before that:
+The writer only reads the header when it writes it out on the first epoch,
+so fields that the data provides late - a position solution, the leap
+seconds decoded from the navigation message - can be completed any time
+before that with [`set_header!`](@ref):
 
-    writer.header.approx_position = position
-    writer.header.leap_seconds = leap_seconds
+    set_header!(writer; approx_position = position, leap_seconds = leap_seconds)
 """
 Base.@kwdef mutable struct RinexObsHeader
     program::String = "RINEXParser.jl"
@@ -623,9 +622,9 @@ Streaming writer for a RINEX 3.05 observation file. `target` is a path, an
 `IO`, or a [`RinexDirectory`](@ref) that names the file by the long
 filename convention when it is closed. The header is written lazily on the
 first [`write_epoch!`](@ref), so `time_of_first_obs` can be filled in from
-the data, and the mutable [`RinexObsHeader`](@ref) in `writer.header` can be
-completed, or replaced with [`set_header!`](@ref), until then. Close the
-writer (or use the do-block form) to flush the file.
+the data, and the header can be completed or replaced with
+[`set_header!`](@ref) until then. Close the writer (or use the do-block
+form) to flush the file.
 
     RinexObsWriter("data.obs", header) do writer
         write_epoch!(writer, epoch)
@@ -875,6 +874,7 @@ header_written(writer::RinexObsWriter) = writer.header_written
 
 """
     set_header!(writer, header) -> writer
+    set_header!(writer; fields...) -> writer
 
 Replace the header `writer` - a [`RinexObsWriter`](@ref) or
 [`RinexNavWriter`](@ref) - writes out with its first record, for the
@@ -883,12 +883,37 @@ the navigation message, a position solution. `header` is checked as it is
 when a writer is created. Once the header is written (see
 [`header_written`](@ref)) the file already carries the old one, and an
 `ArgumentError` is thrown instead.
+
+The keyword form completes the header the writer holds with the `fields`
+given, and leaves the others as they are:
+
+    set_header!(writer; approx_position = position, leap_seconds = 18)
+
+It replaces the header with a changed copy rather than assigning to the one
+the writer was created with, so a header shared with code that keeps reading
+it - the `obs_codes` that place each observation of a [`SatObs`](@ref) - is
+never changed under that code.
 """
 function set_header!(writer::RinexObsWriter, header::RinexObsHeader)
     check_header_unwritten(writer)
     check_obs_header(header)
     writer.header = header
     writer
+end
+
+function set_header!(writer; fields...)
+    check_header_unwritten(writer)
+    header = deepcopy(writer.header)
+    for (name, value) in fields
+        hasfield(typeof(header), name) || throw(
+            ArgumentError(
+                "$(nameof(typeof(header))) has no field $name; it has " *
+                join(fieldnames(typeof(header)), ", "),
+            ),
+        )
+        setproperty!(header, name, value)
+    end
+    set_header!(writer, header)
 end
 
 function check_header_unwritten(writer)
