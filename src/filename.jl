@@ -72,7 +72,8 @@ The fields are
   - `station`, `monument`, `receiver`, `country`: the nine-character site
     identification `XXXXMRCCC` - the four-character station name, the
     monument and receiver number `0-9` at that site, and the ISO 3166-1
-    alpha-3 country or region code.
+    alpha-3 country or region code. A `country` of `nothing` is the `"XXX"`
+    of a country that is not known.
   - `data_source`: `'R'` for a file written from receiver data, `'S'` for one
     written from a data stream, `'U'` if that is unknown.
   - `start_time`: the nominal start time of the first record, in the time
@@ -189,7 +190,7 @@ RinexFileName(;
     station,
     monument,
     receiver,
-    country,
+    something(country, DEFAULT_COUNTRY),
     data_source,
     start_time,
     period,
@@ -745,6 +746,18 @@ function site_fields(marker_name::AbstractString)
     (rpad(first(characters, 4), 4, 'X'), 0, 0, DEFAULT_COUNTRY)
 end
 
+# The site fields of a name: those given, and those of the marker name where
+# a field is not given or given as `nothing`.
+function site_keywords(marker_name, station, monument, receiver, country)
+    derived = site_fields(marker_name)
+    (;
+        station = something(station, derived[1]),
+        monument = something(monument, derived[2]),
+        receiver = something(receiver, derived[3]),
+        country = something(country, derived[4]),
+    )
+end
+
 """
     RinexFileName(header::RinexObsHeader, start_time = header.time_of_first_obs; kwargs...)
 
@@ -761,11 +774,19 @@ as can `marker_name` to derive the site from a name other than the header's;
 than dropped:
 
     rinex_filename(header, start_time; country = "DEU", period = Day(1))
+
+A site field given as `nothing` - `station`, `monument`, `receiver` or
+`country` - is the one the marker name gives, so a caller can pass on a
+setting that may be unset without overruling a site identification.
 """
 function RinexFileName(
     header::RinexObsHeader,
     start_time = header.time_of_first_obs;
     marker_name = header.marker_name,
+    station = nothing,
+    monument = nothing,
+    receiver = nothing,
+    country = nothing,
     keywords...,
 )
     check_data_type_keywords(
@@ -781,12 +802,8 @@ function RinexFileName(
             "after the first epoch was written",
         ),
     )
-    station, monument, receiver, country = site_fields(marker_name)
     RinexFileName(;
-        station,
-        monument,
-        receiver,
-        country,
+        site_keywords(marker_name, station, monument, receiver, country)...,
         start_time,
         interval = header.interval,
         keywords...,
@@ -810,12 +827,17 @@ the site:
 
 `system` and `file_type` are the header's own here too: a navigation file of one
 constellation is named by pinning the header's `satellite_system`, not by
-naming the file something the file is not.
+naming the file something the file is not. A site field given as `nothing`
+is the one the marker name gives, as for an observation file.
 """
 function RinexFileName(
     header::RinexNavHeader,
     start_time = nothing;
     marker_name = "UNKNOWN",
+    station = nothing,
+    monument = nothing,
+    receiver = nothing,
+    country = nothing,
     keywords...,
 )
     check_data_type_keywords(keywords, "a navigation", "its satellite_system", 'N')
@@ -825,12 +847,8 @@ function RinexFileName(
             "passed as RinexFileName(header, start_time)",
         ),
     )
-    station, monument, receiver, country = site_fields(marker_name)
     RinexFileName(;
-        station,
-        monument,
-        receiver,
-        country,
+        site_keywords(marker_name, station, monument, receiver, country)...,
         start_time,
         keywords...,
         system = something(header.satellite_system, 'M'),
