@@ -243,6 +243,7 @@ end
     @test isnothing(nav_satellite_system(['G', 'E']))
     @test isnothing(nav_satellite_system(Char[]))
     @test_throws ArgumentError nav_satellite_system(['X'])
+    @test_throws ArgumentError nav_satellite_system(['G', 'X'])
 end
 
 @testset "Table A8 bit fields" begin

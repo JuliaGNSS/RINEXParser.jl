@@ -129,15 +129,16 @@ end
 
 The `satellite_system` of a [`RinexNavHeader`](@ref) for a file that may
 carry ephemerides of `systems`, the satellite system characters: the one
-system of a single-constellation file, `nothing` for a mixed one. Settled
-from the constellations a file can carry rather than those seen so far, it
-does not reject a second constellation that shows up later.
+system of a single-constellation file, `nothing` for a mixed one. Every
+character is checked, also for a mixed file. Settled from the
+constellations a file can carry rather than those seen so far, it does not
+reject a second constellation that shows up later.
 
     RinexNavHeader(; satellite_system = nav_satellite_system(['G', 'E']))  # mixed
 """
 function nav_satellite_system(systems)
-    distinct = unique(systems)
-    length(distinct) == 1 ? check_satellite_system(only(distinct)) : nothing
+    distinct = unique(map(check_satellite_system, systems))
+    length(distinct) == 1 ? only(distinct) : nothing
 end
 
 """
