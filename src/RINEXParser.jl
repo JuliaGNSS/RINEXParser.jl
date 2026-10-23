@@ -8,7 +8,7 @@ export set_header!, header_written, file_path
 export RinexObsHeader, PhaseShift, ObsValue, SatObs, ObsEpoch, RinexObsWriter, write_epoch!
 export phase_correction
 export loss_of_lock_indicator, signal_strength_indicator
-export LeapSeconds
+export LeapSeconds, time_system
 export RinexNavHeader,
     IonosphericCorrection,
     TimeSystemCorrection,
@@ -18,13 +18,16 @@ export RinexNavHeader,
     galileo_data_sources,
     galileo_sv_health,
     RinexNavWriter,
-    write_ephemeris!
+    write_ephemeris!,
+    navigation_times,
+    ionosphere_time_mark
 
 const RINEX_VERSION = 3.05
 
 include("format.jl")
 include("directory.jl")
 include("obs.jl")
+include("time.jl")
 include("nav.jl")
 # After the headers: the filename is derived from them.
 include("filename.jl")

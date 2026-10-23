@@ -242,11 +242,19 @@ const TIME_SYSTEMS = Dict(
 
 """
     time_system(systems) -> String
+    time_system(header::RinexObsHeader) -> String
 
-Time system of the epochs of an observation file containing `systems`, for
-the `TIME OF FIRST OBS` record. A single-constellation file is written in
-that constellation's time system; a file carrying several constellations
+Time system of the epochs of an observation file containing `systems` - the
+satellite system characters, or those of the `obs_codes` of `header` - as the
+three-letter code of the `TIME OF FIRST OBS` record: `"GPS"`, `"GLO"`,
+`"GAL"`, `"BDT"`, `"QZS"` or `"IRN"`. A single-constellation file is written
+in that constellation's time system; a file carrying several constellations
 uses GPS time, as RINEX prescribes for mixed files.
+
+Every epoch passed to [`write_epoch!`](@ref) has to be in this time system,
+so a writer of observations asks for it rather than deciding it again:
+
+    time_system(header)  # "GPS" for a mixed file
 """
 function time_system(systems)
     length(systems) == 1 || return "GPS"
