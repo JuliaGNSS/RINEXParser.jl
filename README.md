@@ -118,6 +118,10 @@ writer.header.approx_position = position   # from the first PVT solution
 writer.header.leap_seconds = leap_seconds  # decoded from the navigation message
 ```
 
+`set_header!(writer, header)` replaces the header as a whole, checking it as
+the writer checks the one it is created with, and `header_written(writer)`
+says whether it is too late for that.
+
 A GLONASS file lists the frequency channel of each slot it observes, as
 `glonass_slots = [1 => 1, 2 => -4, ...]`, and the code-phase biases of
 `C1C`, `C1P`, `C2C` and `C2P` as `glonass_code_phase_biases` - zeros for
@@ -134,7 +138,12 @@ RINEX encoding of "no measurement", instead of as `NaN` in a numeric field.
 A finite value too wide for its 14 columns - or an indicator, satellite
 number or clock offset too wide for its own field - is rejected with an
 `ArgumentError`, because writing it would shift the rest of the record and
-leave a file that parses but is silently wrong.
+leave a file that parses but is silently wrong. The epoch is checked whole
+before any of it is written, so the file stays as it was. A receiver that
+would rather keep the epoch creates the writer with `overflow = :blank`: an
+observation value or clock offset that does not fit is then written blank,
+as a measurement that is not available, with a warning the first time it
+happens to each field.
 
 ## Navigation files
 
@@ -204,8 +213,8 @@ navigation message source, since I/NAV and F/NAV are separate records; a
 BeiDou record is identified by its reference times instead, since its age
 of data grows while the ephemeris stays the same), so it is safe to forward
 every decoded navigation frame. The nav header is
-also written lazily, and `writer.header` may be updated until the first
-ephemeris is written, which is useful when ionosphere/UTC parameters
+also written lazily, and `set_header!(writer, header)` replaces it until the
+first ephemeris is written, which is useful when ionosphere/UTC parameters
 decode later than the first ephemeris.
 
 Unlike an observation, a navigation record field has no blank encoding that
@@ -250,6 +259,29 @@ rinex_filename(obs_header)                       # start time from time_of_first
 rinex_filename(obs_header, t; country = "DEU")   # marker name gives only the station
 rinex_filename(nav_header, t; marker_name = obs_header.marker_name, period = Day(1))
 ```
+
+A receiver does not know the start time when it opens its files: that is
+the time of the first epoch. A `RinexDirectory` target names the file when
+the writer closes instead. The writer streams into a temporary file in the
+directory and moves it to its long filename on `close`, and `file_path(writer)`
+says where it ended up. A navigation file takes its start time and site
+from the observation writer of its `session`:
+
+```julia
+obs = RinexObsWriter(RinexDirectory("/data"; country = "DEU", period = Day(1)), obs_header)
+nav = RinexNavWriter(RinexDirectory("/data"; session = obs, country = "DEU"), nav_header)
+# ... write_epoch!(obs, ...), write_ephemeris!(nav, ...)
+close(obs); close(nav)
+file_path(obs)  # "/data/ROOF00DEU_R_20200010000_01D_01S_GO.rnx"
+```
+
+Without a session, or with one that got no epoch, a navigation file is named
+after the `toc` of its first ephemeris. A file whose name is taken is
+replaced only for a `RinexDirectory(...; overwrite = true)`; otherwise it is
+left at its temporary path with a warning, which `file_path` reports, and
+`close` does not throw. A file is kept whenever it can be named, header-only
+ones included; a writer that wrote no record and has no start time to be
+named after leaves no file.
 
 `RinexFileName` is the name itself, with a field per element of the
 convention, and `parse(RinexFileName, name)` reads one back - `tryparse`

@@ -837,3 +837,36 @@ function RinexFileName(
         file_type = 'N',
     )
 end
+
+# The name of the file of `header` written to the `RinexDirectory` `target`.
+# `fallback` is the start time when neither of them gives one: the first
+# record of a navigation file, or a stand-in that checks the keywords of the
+# target when the writer is created.
+function file_name(header::RinexObsHeader, target::RinexDirectory; fallback = nothing)
+    start_time = get(target.keywords, :start_time, header.time_of_first_obs)
+    keywords = (k => v for (k, v) in target.keywords if k != :start_time)
+    rinex_filename(header, something(start_time, Some(fallback)); keywords...)
+end
+
+# A navigation file starts with the observations of its session, and is
+# named after their site.
+function file_name(header::RinexNavHeader, target::RinexDirectory; fallback = nothing)
+    session = isnothing(target.session) ? nothing : target.session.header
+    start_time = get(target.keywords, :start_time) do
+        isnothing(session) ? nothing : session.time_of_first_obs
+    end
+    marker_name = get(target.keywords, :marker_name) do
+        isnothing(session) ? "UNKNOWN" : session.marker_name
+    end
+    isnothing(start_time) &&
+        isnothing(fallback) &&
+        throw(
+            ArgumentError(
+                "A navigation file is named after its start time, which neither the " *
+                "start_time of its RinexDirectory, the first epoch of its session nor " *
+                "a record of its own gives",
+            ),
+        )
+    keywords = (k => v for (k, v) in target.keywords if !(k in (:start_time, :marker_name)))
+    rinex_filename(header, something(start_time, fallback); marker_name, keywords...)
+end
