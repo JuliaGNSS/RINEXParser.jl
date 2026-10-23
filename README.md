@@ -223,7 +223,10 @@ decode later than the first ephemeris.
 
 Unlike an observation, a navigation record field has no blank encoding that
 would mean "not available", so an ephemeris carrying a value that is not
-finite is rejected instead of writing `NaN` into a numeric field.
+finite is rejected instead of writing `NaN` into a numeric field. A writer
+created with `overflow = :skip` leaves such a record out instead, warning
+once, so a receiver forwarding every decoded message keeps its output when
+one message was decoded wrong.
 
 `write_ephemeris!` accepts any ephemeris type, so a constellation that is
 not modelled yet can be written by implementing the ephemeris interface -
