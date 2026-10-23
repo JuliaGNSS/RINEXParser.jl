@@ -14,4 +14,5 @@ include("helpers.jl")
     include("obs.jl")
     include("nav.jl")
     include("filename.jl")
+    include("writers.jl")
 end

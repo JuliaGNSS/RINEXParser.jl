@@ -3,7 +3,8 @@ module RINEXParser
 using Dates
 using Printf
 
-export RinexFileName, rinex_filename
+export RinexFileName, rinex_filename, RinexDirectory
+export set_header!, header_written, file_path
 export RinexObsHeader, PhaseShift, ObsValue, SatObs, ObsEpoch, RinexObsWriter, write_epoch!
 export phase_correction
 export loss_of_lock_indicator, signal_strength_indicator
@@ -22,6 +23,7 @@ export RinexNavHeader,
 const RINEX_VERSION = 3.05
 
 include("format.jl")
+include("directory.jl")
 include("obs.jl")
 include("nav.jl")
 # After the headers: the filename is derived from them.

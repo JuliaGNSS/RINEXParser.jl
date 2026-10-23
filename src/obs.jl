@@ -617,17 +617,28 @@ ObsEpoch(
 ) = ObsEpoch(time, fractional_second, flag, clock_offset, collect(satellites))
 
 """
-    RinexObsWriter(target, header::RinexObsHeader)
+    RinexObsWriter(target, header::RinexObsHeader; overflow = :throw)
 
-Streaming writer for a RINEX 3.05 observation file. `target` is a path or
-an `IO`. The header is written lazily on the first [`write_epoch!`](@ref),
-so `time_of_first_obs` can be filled in from the data, and the mutable
-[`RinexObsHeader`](@ref) in `writer.header` can be completed until then.
-Close the writer (or use the do-block form) to flush the file.
+Streaming writer for a RINEX 3.05 observation file. `target` is a path, an
+`IO`, or a [`RinexDirectory`](@ref) that names the file by the long
+filename convention when it is closed. The header is written lazily on the
+first [`write_epoch!`](@ref), so `time_of_first_obs` can be filled in from
+the data, and the mutable [`RinexObsHeader`](@ref) in `writer.header` can be
+completed, or replaced with [`set_header!`](@ref), until then. Close the
+writer (or use the do-block form) to flush the file.
 
     RinexObsWriter("data.obs", header) do writer
         write_epoch!(writer, epoch)
     end
+
+`overflow` says what becomes of an observation value too wide for its 14
+columns, or a receiver clock offset too wide for its 15. `:throw` rejects
+the epoch with an `ArgumentError`, leaving the file as it was. `:blank`
+writes the field blank instead - which is how RINEX records a measurement
+that is not available - and the rest of the epoch as given, and warns once
+per observation code of a system, so that one implausible value does not
+cost the epoch of every other satellite. Either way the value never reaches
+the file, where it would shift the rest of the record.
 """
 mutable struct RinexObsWriter{T<:IO}
     io::T
@@ -635,23 +646,91 @@ mutable struct RinexObsWriter{T<:IO}
     header_written::Bool
     owns_io::Bool
     record::RecordBuffer
+    overflow::Symbol
+    # The fields an overflowing value was blanked in - `(system, code)` for an
+    # observation - so that each is warned about once.
+    blanked::Set{Tuple{Char,String}}
+    # The file being written, `nothing` for an `IO`; a writer to a
+    # `RinexDirectory` moves it to its name on `close`.
+    path::Union{Nothing,String}
+    directory::Union{Nothing,RinexDirectory}
 end
-function RinexObsWriter(io::IO, header::RinexObsHeader)
-    check_obs_header(header)
-    RinexObsWriter(io, header, false, false, RecordBuffer())
+function RinexObsWriter(io::IO, header::RinexObsHeader; overflow::Symbol = :throw)
+    check_writer(header, overflow)
+    obs_writer(io, header, overflow, false, nothing, nothing)
 end
-function RinexObsWriter(path::AbstractString, header::RinexObsHeader)
-    check_obs_header(header)
-    RinexObsWriter(open(path, "w"), header, false, true, RecordBuffer())
+function RinexObsWriter(
+    path::AbstractString,
+    header::RinexObsHeader;
+    overflow::Symbol = :throw,
+)
+    check_writer(header, overflow)
+    obs_writer(open(path, "w"), header, overflow, true, String(path), nothing)
+end
+function RinexObsWriter(
+    target::RinexDirectory,
+    header::RinexObsHeader;
+    overflow::Symbol = :throw,
+)
+    isnothing(target.session) || throw(
+        ArgumentError(
+            "An observation file is named after its own first epoch, so its " *
+            "RinexDirectory takes no session",
+        ),
+    )
+    check_writer(header, overflow)
+    # Checked now rather than when the name is needed on `close`.
+    file_name(header, target; fallback = DateTime(2000))
+    path, io = open_temporary(target)
+    obs_writer(io, header, overflow, true, path, target)
 end
 
-function RinexObsWriter(f::Function, target, header::RinexObsHeader)
-    writer = RinexObsWriter(target, header)
-    try
+# Checked by every constructor before it opens a file, so that a writer it
+# rejects leaves none behind.
+function check_writer(header, overflow)
+    check_obs_header(header)
+    overflow in (:throw, :blank) || throw(
+        ArgumentError(
+            "overflow is :throw to reject a value too wide for its field or :blank to " *
+            "write it blank, not :$overflow",
+        ),
+    )
+    nothing
+end
+
+function obs_writer(io, header, overflow, owns_io, path, directory)
+    RinexObsWriter(
+        io,
+        header,
+        false,
+        owns_io,
+        RecordBuffer(),
+        overflow,
+        Set{Tuple{Char,String}}(),
+        path,
+        directory,
+    )
+end
+
+RinexObsWriter(f::Function, target, header::RinexObsHeader; keywords...) =
+    with_writer(f, RinexObsWriter(target, header; keywords...))
+
+# The do-block form of the writers. An error of `close` while the error of
+# `f` is in flight would replace it, so it is logged instead and the error
+# of `f` is the one that propagates.
+function with_writer(f, writer)
+    result = try
         f(writer)
-    finally
-        close(writer)
+    catch
+        try
+            close(writer)
+        catch exception
+            @error "Closing the writer after an error failed as well" exception
+        end
+        rethrow()
     end
+    close(writer)
+    result
 end
 
 # Checked when the writer is created, so a header the records cannot hold
@@ -770,14 +849,68 @@ function shared_satellites(a::PhaseShift, b::PhaseShift)
 end
 
 function Base.close(writer::RinexObsWriter)
+    # The header is written with the first epoch, so it tells whether any
+    # was.
+    had_records = writer.header_written
     try
         # An empty file still gets its header, so it is valid RINEX.
-        writer.header_written || write_obs_header(writer, nothing, 0.0)
+        had_records || write_obs_header(writer, nothing, 0.0)
     finally
         writer.owns_io ? close(writer.io) : flush(writer.io)
     end
+    isnothing(writer.directory) || (writer.path = name_file!(writer, had_records))
+    writer.directory = nothing
     nothing
 end
+
+"""
+    header_written(writer) -> Bool
+
+Whether `writer` - a [`RinexObsWriter`](@ref) or [`RinexNavWriter`](@ref) -
+has written its header out, which it does with the first record or on
+`close`. Until then its header can be completed or replaced with
+[`set_header!`](@ref); afterwards a change would not reach the file.
+"""
+header_written(writer::RinexObsWriter) = writer.header_written
+
+"""
+    set_header!(writer, header) -> writer
+
+Replace the header `writer` - a [`RinexObsWriter`](@ref) or
+[`RinexNavWriter`](@ref) - writes out with its first record, for the
+fields the data provides late: the corrections and leap seconds decoded from
+the navigation message, a position solution. `header` is checked as it is
+when a writer is created. Once the header is written (see
+[`header_written`](@ref)) the file already carries the old one, and an
+`ArgumentError` is thrown instead.
+"""
+function set_header!(writer::RinexObsWriter, header::RinexObsHeader)
+    check_header_unwritten(writer)
+    check_obs_header(header)
+    writer.header = header
+    writer
+end
+
+function check_header_unwritten(writer)
+    header_written(writer) && throw(
+        ArgumentError(
+            "The header was written with the first record, so it cannot be replaced; " *
+            "check header_written(writer) first",
+        ),
+    )
+    nothing
+end
+
+"""
+    file_path(writer) -> Union{Nothing,String}
+
+The path of the file `writer` - a [`RinexObsWriter`](@ref) or
+[`RinexNavWriter`](@ref) - writes: the path it was created with, or for a
+[`RinexDirectory`](@ref) its temporary path until it is closed and its long
+filename after. `nothing` for a writer to an `IO`, and for a writer to a
+directory that wrote no record and so left no file.
+"""
+file_path(writer::RinexObsWriter) = writer.path
 
 SatObs(writer::RinexObsWriter, args...) = SatObs(writer.header, args...)
 
@@ -947,9 +1080,20 @@ add_indicator!(record::RecordBuffer, indicator::Int) =
 # 6.7.1), so a lost lock flagged on a pseudorange, a Doppler or a signal
 # strength is an error rather than a flag no reader looks for there; a zero
 # is "OK or not known" and stays valid on any of them.
-add_observation!(record::RecordBuffer, ::Nothing, sat::SatObs, code) =
-    add_blanks!(record, 16)
-function add_observation!(record::RecordBuffer, obs::ObsValue, sat::SatObs, code)
+add_observation!(
+    writer::RinexObsWriter,
+    record::RecordBuffer,
+    ::Nothing,
+    sat::SatObs,
+    code,
+) = add_blanks!(record, 16)
+function add_observation!(
+    writer::RinexObsWriter,
+    record::RecordBuffer,
+    obs::ObsValue,
+    sat::SatObs,
+    code,
+)
     (something(obs.lli, 0) == 0 || first(code) == 'L') || throw(
         ArgumentError(
             "Observation $code of satellite $(satellite_id(sat.system, sat.prn)) " *
@@ -958,15 +1102,25 @@ function add_observation!(record::RecordBuffer, obs::ObsValue, sat::SatObs, code
         ),
     )
     isfinite(obs.value) || return add_blanks!(record, 16)
-    fits_fixed_field(obs.value, 3, 14) || fixed_field_error(
-        "Observation $code of satellite $(satellite_id(sat.system, sat.prn))",
-        obs.value,
-        3,
-        14,
-    )
+    if !fits_fixed_field(obs.value, 3, 14)
+        description = "Observation $code of satellite $(satellite_id(sat.system, sat.prn))"
+        writer.overflow == :blank || fixed_field_error(description, obs.value, 3, 14)
+        warn_blanked(writer, (sat.system, code), description, obs.value, 3, 14)
+        return add_blanks!(record, 16)
+    end
     add_field!(record, FMT_F14_3, obs.value)
     add_indicator!(record, obs.lli)
     add_indicator!(record, obs.ssi)
+end
+
+# Once per writer and field, `(system, code)` for an observation: a receiver
+# blanking a value per epoch would otherwise warn at its epoch rate.
+@noinline function warn_blanked(writer, field, description, value, digits, width)
+    field in writer.blanked && return
+    push!(writer.blanked, field)
+    @warn "$description is $value, which does not fit the $width columns of an " *
+          "F$width.$digits field, so it is written blank; further values of this " *
+          "field that do not fit are written blank without a warning"
 end
 
 """
@@ -990,10 +1144,17 @@ function write_epoch!(writer::RinexObsWriter, epoch::ObsEpoch)
     add_integer!(record, length(epoch.satellites), 3)
     if !isnothing(epoch.clock_offset)
         offset = epoch.clock_offset
-        fits_fixed_field(offset, 12, 15) ||
-            fixed_field_error("Receiver clock offset of the epoch", offset, 12, 15)
-        add_blanks!(record, 6)
-        add_field!(record, FMT_F15_12, offset)
+        description = "Receiver clock offset of the epoch"
+        if fits_fixed_field(offset, 12, 15)
+            add_blanks!(record, 6)
+            add_field!(record, FMT_F15_12, offset)
+        elseif writer.overflow == :blank
+            # The field is optional, so blank is an offset that is not
+            # reported.
+            warn_blanked(writer, ('M', "clock offset"), description, offset, 12, 15)
+        else
+            fixed_field_error(description, offset, 12, 15)
+        end
     end
     end_line!(record)
     if !isnothing(epoch.clock_offset) && isnothing(writer.header.clock_offset_applied)
@@ -1026,7 +1187,7 @@ function write_epoch!(writer::RinexObsWriter, epoch::ObsEpoch)
         # fixed-column parsers, matching RTKLIB and GNSS-SDR output.
         add_satellite_id!(record, sat.system, sat.prn)
         for (code, obs) in zip(codes, sat.observations)
-            add_observation!(record, obs, sat, code)
+            add_observation!(writer, record, obs, sat, code)
         end
         end_line!(record)
     end

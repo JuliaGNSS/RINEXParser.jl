@@ -407,9 +407,11 @@ record_contents(eph, ignored::Tuple{Vararg{Symbol}}) = (
 """
     RinexNavWriter(target, header::RinexNavHeader)
 
-Streaming writer for a RINEX 3.05 navigation file. `target` is a path or
-an `IO`. The header is written lazily on the first
-[`write_ephemeris!`](@ref). An ephemeris repeating a record that was
+Streaming writer for a RINEX 3.05 navigation file. `target` is a path, an
+`IO`, or a [`RinexDirectory`](@ref) that names the file by the long
+filename convention when it is closed. The header is written lazily on the
+first [`write_ephemeris!`](@ref), and [`set_header!`](@ref) replaces it until
+then. An ephemeris repeating a record that was
 already written - the same contents but for the transmission time, and for
 BeiDou the ages of the data - is skipped, so it is safe to forward every
 decoded subframe; one whose health, accuracy or any other value changed
@@ -424,24 +426,49 @@ mutable struct RinexNavWriter{T<:IO}
     # Keys come from `dedupe_key`, whose shape differs per ephemeris type.
     written::Set{Tuple}
     record::RecordBuffer
+    # As in `RinexObsWriter`.
+    path::Union{Nothing,String}
+    directory::Union{Nothing,RinexDirectory}
+    # The toc of the first record, which a file to a `RinexDirectory` without
+    # another start time is named after.
+    first_toc::Union{Nothing,DateTime}
 end
 function RinexNavWriter(io::IO, header::RinexNavHeader = RinexNavHeader())
     check_nav_header(header)
-    RinexNavWriter(io, header, false, false, Set{Tuple}(), RecordBuffer())
+    nav_writer(io, header, false, nothing, nothing)
 end
 function RinexNavWriter(path::AbstractString, header::RinexNavHeader = RinexNavHeader())
     check_nav_header(header)
-    RinexNavWriter(open(path, "w"), header, false, true, Set{Tuple}(), RecordBuffer())
+    nav_writer(open(path, "w"), header, true, String(path), nothing)
+end
+function RinexNavWriter(target::RinexDirectory, header::RinexNavHeader = RinexNavHeader())
+    (isnothing(target.session) || target.session isa RinexObsWriter) || throw(
+        ArgumentError(
+            "The session of a navigation file is the RinexObsWriter of its " *
+            "observations, not a $(typeof(target.session))",
+        ),
+    )
+    check_nav_header(header)
+    # Checked now rather than when the name is needed on `close`.
+    file_name(header, target; fallback = DateTime(2000))
+    path, io = open_temporary(target)
+    nav_writer(io, header, true, path, target)
 end
 
-function RinexNavWriter(f::Function, target, header::RinexNavHeader = RinexNavHeader())
-    writer = RinexNavWriter(target, header)
-    try
-        f(writer)
-    finally
-        close(writer)
-    end
-end
+nav_writer(io, header, owns_io, path, directory) = RinexNavWriter(
+    io,
+    header,
+    false,
+    owns_io,
+    Set{Tuple}(),
+    RecordBuffer(),
+    path,
+    directory,
+    nothing,
+)
+
+RinexNavWriter(f::Function, target, header::RinexNavHeader = RinexNavHeader()) =
+    with_writer(f, RinexNavWriter(target, header))
 
 # Checked when the writer is created, not only when the header is written
 # out: the lazy header write happens inside `close`, where an exception
@@ -460,13 +487,28 @@ function check_nav_header(header::RinexNavHeader)
 end
 
 function Base.close(writer::RinexNavWriter)
+    had_records = writer.header_written
     try
-        writer.header_written || write_nav_header(writer)
+        had_records || write_nav_header(writer)
     finally
         writer.owns_io ? close(writer.io) : flush(writer.io)
     end
+    isnothing(writer.directory) ||
+        (writer.path = name_file!(writer, had_records, writer.first_toc))
+    writer.directory = nothing
     nothing
 end
+
+header_written(writer::RinexNavWriter) = writer.header_written
+
+function set_header!(writer::RinexNavWriter, header::RinexNavHeader)
+    check_header_unwritten(writer)
+    check_nav_header(header)
+    writer.header = header
+    writer
+end
+
+file_path(writer::RinexNavWriter) = writer.path
 
 function write_nav_header(writer::RinexNavWriter)
     io = writer.io
@@ -638,5 +680,6 @@ function write_ephemeris!(writer::RinexNavWriter, eph)
     writer.header_written || write_nav_header(writer)
     flush_record!(writer.io, record)
     push!(writer.written, key)
+    isnothing(writer.first_toc) && (writer.first_toc = t)
     true
 end
