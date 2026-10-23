@@ -175,3 +175,29 @@ end
         writer.header = RinexNavHeader(satellite_system = 'X')
     end
 end
+
+@testset "the header is completed field by field through the writer" begin
+    header = RinexObsHeader(obs_codes = ['G' => ["C1C"]])
+    io = IOBuffer()
+    obs = RinexObsWriter(io, header)
+    @test set_header!(obs; approx_position = (1.0, 2.0, 3.0), leap_seconds = 18) === obs
+    @test obs.header.approx_position == (1.0, 2.0, 3.0)
+    @test obs.header.leap_seconds == LeapSeconds(18)
+    # A copy is completed, so the header the writer was created with - which
+    # its caller may still be reading - is not changed under it.
+    @test isnothing(header.approx_position)
+    @test obs.header !== header
+    @test_throws ArgumentError set_header!(obs; antenna = "UNKNOWN")
+    # Checked as a whole header is, and left as it was.
+    @test_throws ArgumentError set_header!(obs; marker_type = "X"^21)
+    @test obs.header.marker_type == "GEODETIC"
+    close(obs)
+    lines = readlines(seekstart(io))
+    @test any(l -> label(l) == "LEAP SECONDS", lines)
+    @test_throws ArgumentError set_header!(obs; leap_seconds = 18)
+
+    nav = RinexNavWriter(IOBuffer())
+    set_header!(nav; leap_seconds = 18)
+    @test nav.header.leap_seconds == LeapSeconds(18)
+    close(nav)
+end

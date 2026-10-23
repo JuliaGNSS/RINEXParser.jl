@@ -108,19 +108,23 @@ so a code that is not a known tracking mode - BDS B1I as `C1I` rather
 than `C2I`, a pseudorange of the codeless GPS tracking - is rejected when
 the writer is created.
 
-`RinexObsHeader` is mutable and the header is written when the first epoch
-arrives, so `time_of_first_obs` is filled in from that epoch - and assigned
-to the header, so `rinex_filename` can name the file from it afterwards -
-and fields that the data provides late can be assigned until then:
+The header is written when the first epoch arrives, so `time_of_first_obs`
+is filled in from that epoch - and assigned to the header, so
+`rinex_filename` can name the file from it afterwards - and fields that the
+data provides late can be completed until then:
 
 ```julia
-writer.header.approx_position = position   # from the first PVT solution
-writer.header.leap_seconds = leap_seconds  # decoded from the navigation message
+set_header!(writer;
+    approx_position = position,   # from the first PVT solution
+    leap_seconds = leap_seconds,  # decoded from the navigation message
+)
 ```
 
-`set_header!(writer, header)` replaces the header as a whole, checking it as
-the writer checks the one it is created with, and `header_written(writer)`
-says whether it is too late for that.
+The keyword form changes a copy of the writer's header, so a header shared
+with code that keeps reading it is never changed under that code.
+`set_header!(writer, header)` replaces the header as a whole. Either is
+checked as the writer checks the header it is created with, and
+`header_written(writer)` says whether it is too late for that.
 
 A GLONASS file lists the frequency channel of each slot it observes, as
 `glonass_slots = [1 => 1, 2 => -4, ...]`, and the code-phase biases of
