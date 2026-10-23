@@ -403,3 +403,39 @@ end
     @test occursin("navigation header", nav)
     @test !occursin("time_of_first_obs", nav)
 end
+
+@testset "a site field given as nothing is the marker name's" begin
+    header = RinexObsHeader(;
+        marker_name = "ROOF12DEU",
+        obs_codes = ['G' => ["C1C"]],
+        interval = 1.0,
+    )
+    start = DateTime(2020, 1, 1)
+    # A setting that may be unset is passed on without overruling the site
+    # identification of the marker name.
+    @test rinex_filename(header, start; country = nothing, monument = nothing) ==
+          rinex_filename(header, start) ==
+          "ROOF12DEU_R_20200010000_00U_01S_GO.rnx"
+    @test rinex_filename(header, start; country = "AUT") ==
+          "ROOF12AUT_R_20200010000_00U_01S_GO.rnx"
+    @test rinex_filename(
+        RinexNavHeader(),
+        start;
+        marker_name = "ROOF12DEU",
+        country = nothing,
+    ) == "ROOF12DEU_R_20200010000_00U_MN.rnx"
+    # Without a marker name to take it from, a country of nothing is unknown.
+    @test rinex_filename(; station = "ROOF", country = nothing, start_time = start) ==
+          "ROOF00XXX_R_20200010000_00U_00U_MO.rnx"
+
+    # As a keyword of a directory, which names the files of a session.
+    directory = mktempdir()
+    epoch = ObsEpoch(start, [SatObs(header, 'G', 1, "C1C" => 1.0)])
+    obs = RinexObsWriter(RinexDirectory(directory; country = nothing), header)
+    nav = RinexNavWriter(RinexDirectory(directory; session = obs, country = nothing))
+    write_epoch!(obs, epoch)
+    close(obs)
+    close(nav)
+    @test basename(file_path(obs)) == "ROOF12DEU_R_20200010000_00U_01S_GO.rnx"
+    @test basename(file_path(nav)) == "ROOF12DEU_R_20200010000_00U_MN.rnx"
+end
