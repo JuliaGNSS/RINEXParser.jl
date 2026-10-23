@@ -34,22 +34,16 @@ const WEEK_SYSTEMS = Dict("GPS" => 'G', "GAL" => 'E', "BDT" => 'C')
     epoch_time(time_system; week, time_of_week) -> (; time, fractional_second)
 
 The `time` and `fractional_second` of an [`ObsEpoch`](@ref) at `week` and
-`time_of_week` [s] of `time_system` - `"GPS"`, `"GAL"` or `"BDT"`, the
-[`time_system`](@ref) of the file. `week` is the continuous week on the count
-of that time system's own constellation, as [`navigation_times`](@ref) takes
-it: the GPS week, the Galileo (GST) week, the BDT week. The calendar time is
-in `time_system` - a BDT epoch reads 14 s behind the GPS one of the same
-instant.
+`time_of_week` [s] of `time_system`: `"GPS"`, `"GAL"` or `"BDT"`, the
+[`time_system`](@ref) of the file. `week` is on that time system's own count
+(the GPS, GST or BDT week), and the calendar time is in `time_system`: a BDT
+epoch reads 14 s behind the GPS one of the same instant.
 
     t = epoch_time("GPS"; week = 2124, time_of_week = 345600.25)
     ObsEpoch(t.time, satellites; t.fractional_second)
 
-A `time_of_week` outside the week is taken on the count of `week`: negative
-in the week before, past its end in the week after, so a time of week moved
-into another time system needs no rollover of its own. Both parts are exact
-to the precision of `time_of_week`: the week and the whole milliseconds go
-into the `DateTime`, and only the rest of the millisecond into
-`fractional_second`.
+A negative `time_of_week` lies in the week before, one past the end of the
+week in the week after. Both parts keep the precision of `time_of_week`.
 """
 function epoch_time(time_system::AbstractString; week::Integer, time_of_week::Real)
     system = get(WEEK_SYSTEMS, time_system, nothing)
