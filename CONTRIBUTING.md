@@ -19,7 +19,7 @@ version in a separate environment and format the same paths as CI:
 
 ```sh
 julia --project=/tmp/rinex-formatter -e 'using Pkg; Pkg.add(PackageSpec(name="JuliaFormatter", version="2.8.5"))'
-julia --project=/tmp/rinex-formatter -e 'using JuliaFormatter; format(["src", "test", "docs/make.jl"])'
+julia --project=/tmp/rinex-formatter -e 'using JuliaFormatter; format(["src", "ext", "test", "docs/make.jl"])'
 ```
 
 Build the documentation locally; examples execute during the build and
