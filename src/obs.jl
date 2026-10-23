@@ -939,6 +939,8 @@ file_path(writer::RinexObsWriter) = writer.path
 
 SatObs(writer::RinexObsWriter, args...) = SatObs(writer.header, args...)
 
+time_system(header::RinexObsHeader) = time_system(first.(header.obs_codes))
+
 function obs_codes_for(header::RinexObsHeader, system::Char)
     index = findfirst(p -> first(p) == system, header.obs_codes)
     isnothing(index) && throw(
@@ -1010,7 +1012,7 @@ function write_obs_header(writer::RinexObsWriter, first_epoch_time, first_epoch_
             lpad(minute(t), 6) *
             Printf.format(FMT_F13_7, seconds) *
             " "^5 *
-            time_system(first.(header.obs_codes))
+            time_system(header)
         header_line(io, content, "TIME OF FIRST OBS")
     end
     if !isnothing(header.clock_offset_applied)

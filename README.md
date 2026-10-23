@@ -228,6 +228,16 @@ created with `overflow = :skip` leaves such a record out instead, warning
 once, so a receiver forwarding every decoded message keeps its output when
 one message was decoded wrong.
 
+The week counts and times of a record follow from the week and seconds of
+week a message was broadcast at, and `navigation_times` derives them -
+the week of `toe`, aligned with the GPS week for Galileo, the calendar `toc`,
+and the transmission time on the count of the record's week - for a message
+broadcast across a week boundary as well:
+
+```julia
+GPSEphemeris(; prn, ..., navigation_times('G'; week, transmission_time, toe, toc)...)
+```
+
 `write_ephemeris!` accepts any ephemeris type, so a constellation that is
 not modelled yet can be written by implementing the ephemeris interface -
 `RINEXParser.satellite_system`, `RINEXParser.dedupe_key`, `RINEXParser.orbit_lines`
