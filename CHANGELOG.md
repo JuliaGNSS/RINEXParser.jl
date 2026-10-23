@@ -1,5 +1,24 @@
 # Changelog
 
+# [4.1.0](https://github.com/JuliaGNSS/RINEXParser.jl/compare/v4.0.0...v4.1.0) (2026-10-23)
+
+
+### Bug Fixes
+
+* **nav:** check every system of nav_satellite_system, also for a mixed file ([caf276e](https://github.com/JuliaGNSS/RINEXParser.jl/commit/caf276e05cc5c3435696b438ba73e687a31233a1))
+
+
+### Features
+
+* build obs_codes from signals, the nav satellite system from systems, and epochs from a GNSSSignals time system ([cf8d9e2](https://github.com/JuliaGNSS/RINEXParser.jl/commit/cf8d9e2f672623aab8999bc48175a3f6d0dcc52e))
+* complete a header field by field with set_header!(writer; fields...) ([2e55075](https://github.com/JuliaGNSS/RINEXParser.jl/commit/2e55075107e2d98ef11f1c82ed38280d77d5542f))
+* convert decoded messages and signals through package extensions ([69607a0](https://github.com/JuliaGNSS/RINEXParser.jl/commit/69607a07d1f75c650dcdef92b60959f920e1cec7))
+* export time_system, navigation_times and ionosphere_time_mark ([74eee9e](https://github.com/JuliaGNSS/RINEXParser.jl/commit/74eee9e5f616e445c382f1ece181a7c41cd3a2fd))
+* **filename:** take a site field given as nothing from the marker name ([5726854](https://github.com/JuliaGNSS/RINEXParser.jl/commit/572685432b5a9dd84c9ba5f1a10630335fd1ffda))
+* name files on close, replace headers through the writer, blank overflowing values ([b2c3aef](https://github.com/JuliaGNSS/RINEXParser.jl/commit/b2c3aefd8b3c9cc49cf4cce6f2e1ece9add396cf))
+* name the epoch time, the GNSSSignals time system and the messages with a record ([3c210f3](https://github.com/JuliaGNSS/RINEXParser.jl/commit/3c210f3bf55ee00429e74e78009e96f684492a31))
+* **nav:** leave out an ephemeris that does not fit with overflow = :skip ([71fb1bc](https://github.com/JuliaGNSS/RINEXParser.jl/commit/71fb1bc4aed9a3cc27b8fe67d9d9e24a2b92f5b2))
+
 # [4.0.0](https://github.com/JuliaGNSS/RINEXParser.jl/compare/v3.0.0...v4.0.0) (2026-10-22)
 
 
