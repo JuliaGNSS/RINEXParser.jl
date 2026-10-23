@@ -409,7 +409,7 @@ end
 
 A single observation: the measurement `value` plus the optional loss-of-lock
 indicator `lli` and signal-strength indicator `ssi`. Units follow RINEX
-conventions: pseudorange in meters, carrier phase in whole cycles, Doppler
+conventions: pseudorange in meters, carrier phase in cycles, Doppler
 in Hz, signal strength in dB-Hz.
 
 The loss-of-lock indicator is a bit field of three bits, so it holds 0-7
@@ -956,9 +956,8 @@ end
 function write_obs_header(writer::RinexObsWriter, first_epoch_time, first_epoch_fraction)
     io = writer.io
     header = writer.header
-    # Checked again here, not only where the writer was created: the header
-    # is documented as assignable until this runs, so this is the first
-    # point at which what is written out is known.
+    # Checked again: the header is mutable, so its fields may have changed
+    # since the writer was created.
     check_obs_header(header)
     version_type_line(io, "OBSERVATION DATA", first.(header.obs_codes))
     program_line(io, header.program, header.run_by)
