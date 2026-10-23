@@ -100,3 +100,27 @@ end
     @test time_system(RinexObsHeader(obs_codes = ['C' => ["C2I"]])) == "BDT"
     @test time_system(RinexObsHeader(obs_codes = ['C' => ["C2I"], 'E' => ["C1C"]])) == "GPS"
 end
+
+@testset "the time of an observation epoch" begin
+    # GPS week 2124 starts on Sunday 2020-09-20.
+    t = epoch_time("GPS"; week = 2124, time_of_week = 4 * 86400 + 0.25)
+    @test t == (; time = DateTime(2020, 9, 24, 0, 0, 0, 250), fractional_second = 0.0)
+    # Below the millisecond the rest goes into the fractional second.
+    t = epoch_time("GPS"; week = 2124, time_of_week = 30.1234567)
+    @test t.time == DateTime(2020, 9, 20, 0, 0, 30, 123)
+    @test t.fractional_second ≈ 4.567e-4 atol = 1e-12
+    @test ObsEpoch(t.time, SatObs[]; t.fractional_second) isa ObsEpoch
+
+    # Galileo counts its weeks from GPS week 1024, BDS from 2006-01-01: week
+    # 730 begins on 2019-12-29.
+    @test epoch_time("GAL"; week = 2124 - 1024, time_of_week = 0).time ==
+          DateTime(2020, 9, 20)
+    @test epoch_time("BDT"; week = 730, time_of_week = 86400).time == DateTime(2019, 12, 30)
+
+    # A time of week outside the week lies in the week before or after.
+    @test epoch_time("BDT"; week = 731, time_of_week = -14).time ==
+          DateTime(2020, 1, 5) - Second(14)
+    @test epoch_time("GPS"; week = 2124, time_of_week = 604800 + 1.5).time ==
+          DateTime(2020, 9, 27, 0, 0, 1, 500)
+    @test_throws ArgumentError epoch_time("GLO"; week = 2124, time_of_week = 0)
+end

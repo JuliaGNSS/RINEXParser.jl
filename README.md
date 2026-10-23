@@ -251,7 +251,8 @@ and optionally `RINEXParser.clock_coefficients`, see
 
 With GNSSDecoder.jl loaded, `rinex_ephemeris(decoder; week)` converts a
 decoded navigation message into its record - `nothing` for a message that is
-not complete, or one RINEX 3.05 has no record for, such as GPS CNAV - and
+not complete, or one RINEX 3.05 has no record for, such as GPS CNAV, which
+`has_rinex_ephemeris(decoder)` tells apart - and
 `add_header_records!(header, decoder; week)` collects the ionospheric and
 time-system corrections and the leap seconds it carries. `week` is the
 continuous week on the constellation's own count, which
@@ -274,6 +275,9 @@ end
 With GNSSSignals.jl loaded, `observation_code(type, signal)` names the
 observable of a signal - `observation_code('L', BeiDouB1I()) == "L2I"` - and
 `RINEXParser.satellite_system(signal)` its constellation.
+`gnss_time_system(time_system(header))` is the GNSSSignals time system the
+epochs of a file are in, and `time_system(GNSSSignals.BDT()) == "BDT"` the
+other way round.
 
 ## File names
 
@@ -371,7 +375,10 @@ kept small (conventionally below 1 ms). A software receiver does not need
 hardware clock steering for this: once a PVT solution provides the clock
 offset, schedule the measurement epochs at the sample instants
 corresponding to integer GPS seconds and propagate code and carrier phase
-to that instant. Any residual offset can be reported per epoch via
+to that instant. `epoch_time(time_system(header); week, time_of_week)`
+gives the `time` and `fractional_second` of the `ObsEpoch` at such an
+instant, the week on the count of the file's time system. Any residual
+offset can be reported per epoch via
 `clock_offset`, which RINEX allows only together with the `RCV CLOCK OFFS
 APPL` record: set the header's `clock_offset_applied` to say whether the
 epochs were corrected by it.

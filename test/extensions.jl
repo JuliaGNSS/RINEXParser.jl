@@ -221,6 +221,9 @@ end
     @test !is_decoding_completed_for_positioning(partial)
     @test isnothing(rinex_ephemeris(partial; week = GPS_WEEK))
     @test isnothing(rinex_ephemeris(GNSSDecoderState(GalileoE1B(), 24)))
+    # It will have one once it is complete.
+    @test has_rinex_ephemeris(partial)
+    @test has_rinex_ephemeris(GNSSDecoderState(GalileoE1B(), 24))
 end
 
 @testset "an ephemeris broadcast across the week boundary" begin
@@ -361,10 +364,13 @@ end
     # 3.05 cannot express, so those decoders yield no record.
     for system in (GPSL5I(), GPSL2CM())
         @test isnothing(rinex_ephemeris(GNSSDecoderState(system, 3); week = GPS_WEEK))
+        @test !has_rinex_ephemeris(GNSSDecoderState(system, 3))
     end
-    @test isnothing(
-        rinex_ephemeris(decoder_with(BeiDouB1C_D(), 21, GNSSDecoder.BeiDouB1CData())),
-    )
+    b1c = decoder_with(BeiDouB1C_D(), 21, GNSSDecoder.BeiDouB1CData())
+    @test isnothing(rinex_ephemeris(b1c))
+    @test !has_rinex_ephemeris(b1c)
+    @test has_rinex_ephemeris(GNSSDecoderState(GalileoE5aI(), 24))
+    @test has_rinex_ephemeris(GNSSDecoderState(BeiDouB1I(), 21))
 end
 
 # GPS subframe 4 page 18: the Klobuchar ionosphere model, the UTC offset and
@@ -596,4 +602,22 @@ end
     # A header of the codes is one the writer takes.
     obs_codes = ['G' => [observation_code(t, GPSL1CA()) for t in ('C', 'L', 'D', 'S')]]
     @test RinexObsWriter(IOBuffer(), RinexObsHeader(; obs_codes)) isa RinexObsWriter
+end
+
+@testset "the GNSSSignals time system of a RINEX time system" begin
+    @test gnss_time_system("GPS") == GNSSSignals.GPST()
+    @test gnss_time_system("GAL") == GNSSSignals.GST()
+    @test gnss_time_system("BDT") == GNSSSignals.BDT()
+    @test_throws ArgumentError gnss_time_system("GLO")
+    # Of the epochs of a file: GPS time for a mixed one.
+    @test gnss_time_system(['C']) == GNSSSignals.BDT()
+    @test gnss_time_system(['C', 'E']) == GNSSSignals.GPST()
+    @test gnss_time_system(RinexObsHeader(obs_codes = ['E' => ["C1C"]])) ==
+          GNSSSignals.GST()
+    # And back, for every one.
+    for code in ("GPS", "GAL", "BDT")
+        @test time_system(gnss_time_system(code)) == code
+    end
+    # The time system of a signal's measurements has a code.
+    @test time_system(get_time_system(BeiDouB1I())) == "BDT"
 end

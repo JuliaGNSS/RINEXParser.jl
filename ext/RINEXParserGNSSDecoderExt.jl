@@ -12,7 +12,7 @@ using GNSSDecoder:
     GNSSDecoderState,
     is_decoding_completed_for_positioning,
     resolve_reference_week
-import RINEXParser: rinex_ephemeris, add_header_records!
+import RINEXParser: rinex_ephemeris, has_rinex_ephemeris, add_header_records!
 using RINEXParser:
     RINEXParser,
     BeiDouEphemeris,
@@ -56,6 +56,9 @@ function header_week(decoder, week)
 end
 
 # Messages RINEX 3.05 has a record for, and every other one.
+has_rinex_ephemeris(::GNSSDecoderState) = false
+has_rinex_ephemeris(::GNSSDecoderState{<:Union{GPSData,GalileoData,BeiDouData}}) = true
+
 rinex_ephemeris(::GNSSDecoderState; week = nothing) = nothing
 
 function rinex_ephemeris(decoder::GNSSDecoderState{<:GPSData}; week = nothing)
