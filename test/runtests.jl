@@ -18,6 +18,7 @@ include("helpers.jl")
     @testset "Aqua" begin
         Aqua.test_all(RINEXParser)
     end
+    include("api.jl")
     include("format.jl")
     include("obs.jl")
     include("nav.jl")
