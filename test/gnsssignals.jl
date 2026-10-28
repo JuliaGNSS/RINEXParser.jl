@@ -101,3 +101,24 @@ end
     @test epoch_time(GNSSSignals.BDT(); week = 730, time_of_week = 86400).time ==
           DateTime(2019, 12, 30)
 end
+
+@testset "the epoch times agree with GNSSSignals' time systems" begin
+    # RINEXParser keeps its own week origins, so that its core needs no GNSSSignals;
+    # they are the ones GNSSSignals defines.
+    @test RINEXParser.SECONDS_PER_WEEK == GNSSSignals.SECONDS_PER_WEEK
+    for code in ("GPS", "GAL", "BDT")
+        system = gnss_time_system(code)
+        # Week 0 of a system starts at its TAI origin, labelled in its own time: the
+        # TAI origin less the system's offset from TAI.
+        origin = epoch_time(code; week = 0, time_of_week = 0).time
+        offset = get_tai_offset(system)
+        @test (TAITime(get_tai_system_start_time(system)) - TAITime(origin)) *
+              oneunit(offset) == offset
+        # And its weeks are GNSSSignals' weeks.
+        week, time_of_week = 1100, 345600.25
+        t = epoch_time(code; week, time_of_week)
+        @test t.time - origin ==
+              DateTime(get_week_start_epoch(system, week) + time_of_week) -
+              DateTime(get_week_start_epoch(system, 0))
+    end
+end
