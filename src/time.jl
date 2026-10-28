@@ -84,10 +84,10 @@ keywords of an ephemeris:
 
 A message is broadcast within hours of its reference times, but not always
 in the same week: late on a Saturday the next week's ephemeris is often on
-the air already with a `toe` near zero, and just after the rollover the last
-one of the old week may still be. Each reference time is placed in the week
-that puts it within half a week of the broadcast, as RTKLIB's `adjweek`
-does. The record carries
+the air already with a `toe` near zero, and just after the week crossover
+the last one of the old week may still be. Each reference time is placed in
+the week that puts it within half a week of the broadcast, as RTKLIB's
+`adjweek` does. The record carries
 
   - `week`: the week of `toe` (Tables A6, A8 and A14), aligned
     with the GPS week for Galileo - the GST week plus 1024 - and the BDT

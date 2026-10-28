@@ -108,7 +108,7 @@ end
   Galileo bit fields. BDS records are in BDT, and their ionospheric records
   carry the mandatory `time_mark` and `sv_id`.
 - `navigation_times` derives a record's week, `toc` and transmission time
-  from the broadcast week and seconds of week, across a week boundary too.
+  from the broadcast week and seconds of week, across a week crossover too.
 - An ephemeris that repeats a written record is skipped, so every decoded
   frame can be forwarded. The header can be replaced with
   `set_header!(writer, header)` until the first ephemeris is written, for

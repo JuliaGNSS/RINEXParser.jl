@@ -233,7 +233,7 @@ end
     @test has_rinex_ephemeris(GNSSDecoderState(GalileoE1B(), 24))
 end
 
-@testset "an ephemeris broadcast across the week boundary" begin
+@testset "an ephemeris broadcast across a week crossover" begin
     # Late on a Saturday the next week's ephemeris is already on the air, its
     # reference times at zero of that week. The record carries the week of
     # `toe`, and the transmission time on that week's count.
@@ -244,7 +244,7 @@ end
     @test ahead.week == GPS_WEEK + 1
     @test ahead.toc == GPS_TOC + Day(3)
     @test ahead.transmission_time == 604000 - 604800
-    # Just after the rollover, the last ephemeris of the old week may still be
+    # Just after the crossover, the last ephemeris of the old week may still be
     # broadcast.
     behind = rinex_ephemeris(
         decoder_with(
@@ -354,8 +354,8 @@ end
     @test accuracy(15) == 8192.0
 
     # The transmission time refers to the record's own week: a subframe
-    # received just after the week rolled over is counted from the week
-    # before, which its `toe` belongs to.
+    # received just after a week crossover is counted from the week before,
+    # which its `toe` belongs to.
     @test eph.transmission_time == Float64(BDT_SOW + 65)
     rolled = rinex_ephemeris(
         decoder_with(BeiDouB1I(), 21, beidou_dnav_data(; SOW = 30, t_0e = 604000));

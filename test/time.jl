@@ -17,8 +17,9 @@
     @test ahead.toc == DateTime(2020, 9, 27)
     @test ahead.transmission_time == 604000 - 604800
 
-    # Just after the rollover the last one of the old week may still be. A
-    # Galileo week is counted from GPS week 1024, and written aligned with it.
+    # Just after the week crossover the last one of the old week may still
+    # be. A Galileo week is counted from GPS week 1024, and written aligned
+    # with it.
     behind = navigation_times(
         'E';
         week = 2124 - 1024,
