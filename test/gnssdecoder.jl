@@ -139,8 +139,8 @@ beidou_dnav_data(; kwargs...) = GNSSDecoder.BeiDouDNAVData(;
 )
 
 # A decoder state holding `data` as validated navigation data.
-decoder_with(system, prn, data) = GNSSDecoder.GNSSDecoderState(
-    GNSSDecoderState(system, prn);
+decoder_with(signal, prn, data) = GNSSDecoder.GNSSDecoderState(
+    GNSSDecoderState(signal, prn);
     data,
     raw_data = data,
     num_bits_since_sync = 0,
@@ -377,11 +377,11 @@ end
 @testset "RINEX 3.05 has no record for the CNAV messages" begin
     # GPS L5 and L2C and BDS B1C broadcast a quasi-Keplerian ephemeris RINEX
     # 3.05 cannot express, so those decoders yield no record.
-    for system in (GPSL5I(), GPSL2CM())
+    for signal in (GPSL5I(), GPSL2CM())
         @test isnothing(
-            rinex_ephemeris(GNSSDecoderState(system, 3); approximate_year = YEAR),
+            rinex_ephemeris(GNSSDecoderState(signal, 3); approximate_year = YEAR),
         )
-        @test !has_rinex_ephemeris(GNSSDecoderState(system, 3))
+        @test !has_rinex_ephemeris(GNSSDecoderState(signal, 3))
     end
     b1c = decoder_with(BeiDouB1C_D(), 21, GNSSDecoder.BeiDouB1CData())
     @test isnothing(rinex_ephemeris(b1c; approximate_year = YEAR))

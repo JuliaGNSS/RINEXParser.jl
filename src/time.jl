@@ -15,20 +15,20 @@ const GALILEO_WEEK_OFFSET = 1024
 
 # The week of a record of `system`, from the week its constellation counts,
 # and the calendar origin that week counts from.
-function record_week(system::Char, week::Integer)
-    system == 'G' && return Int(week), GPS_EPOCH
-    system == 'E' && return Int(week) + GALILEO_WEEK_OFFSET, GPS_EPOCH
-    system == 'C' && return Int(week), BDT_EPOCH
+function record_week(satellite_system::Char, week::Integer)
+    satellite_system == 'G' && return Int(week), GPS_EPOCH
+    satellite_system == 'E' && return Int(week) + GALILEO_WEEK_OFFSET, GPS_EPOCH
+    satellite_system == 'C' && return Int(week), BDT_EPOCH
     throw(
         ArgumentError(
             "The navigation record times are known for GPS ('G'), Galileo ('E') and " *
-            "BDS ('C'), not for system '$system'",
+            "BDS ('C'), not for satellite system '$satellite_system'",
         ),
     )
 end
 
 # The constellation whose week a time system of an observation file counts.
-const WEEK_SYSTEMS = Dict("GPS" => 'G', "GAL" => 'E', "BDT" => 'C')
+const WEEK_SATELLITE_SYSTEMS = Dict("GPS" => 'G', "GAL" => 'E', "BDT" => 'C')
 
 """
     epoch_time(time_system; week, time_of_week) -> (; time, fractional_second)
@@ -47,15 +47,15 @@ A negative `time_of_week` lies in the week before, one past the end of the
 week in the week after. Both parts keep the precision of `time_of_week`.
 """
 function epoch_time(time_system::AbstractString; week::Integer, time_of_week::Real)
-    system = get(WEEK_SYSTEMS, time_system, nothing)
-    isnothing(system) && throw(
+    satellite_system = get(WEEK_SATELLITE_SYSTEMS, time_system, nothing)
+    isnothing(satellite_system) && throw(
         ArgumentError(
             "The epoch times are known for the time systems " *
-            join(sort!(collect(keys(WEEK_SYSTEMS))), ", ") *
+            join(sort!(collect(keys(WEEK_SATELLITE_SYSTEMS))), ", ") *
             ", not for \"$time_system\"",
         ),
     )
-    record, origin = record_week(system, week)
+    record, origin = record_week(satellite_system, week)
     whole_seconds = floor(Int, time_of_week)
     fraction = time_of_week - whole_seconds
     whole_milliseconds = floor(Int, fraction * 1000)
@@ -69,16 +69,16 @@ function epoch_time(time_system::AbstractString; week::Integer, time_of_week::Re
 end
 
 """
-    navigation_times(system; week, transmission_time, toe, toc)
+    navigation_times(satellite_system; week, transmission_time, toe, toc)
         -> (; week, toc, transmission_time)
 
 The `week`, `toc` and `transmission_time` fields of a navigation record of
-`system` - `'G'`, `'E'` or `'C'` - from a broadcast message: `week` and
-`transmission_time` are the continuous week and the seconds of week it was
-broadcast at, and `toe` and `toc` its reference times of ephemeris and
-clock in seconds of week, all on the count of the constellation's own time:
-the GPS week, the Galileo (GST) week, the BDT week. Splatted into the
-keywords of an ephemeris:
+`satellite_system` - `'G'`, `'E'` or `'C'` - from a broadcast message: `week`
+and `transmission_time` are the continuous week and the seconds of week it was
+broadcast at, and `toe` and `toc` its reference times of ephemeris and clock in
+seconds of week, all on the count of the constellation's own time: the GPS week,
+the Galileo (GST) week, the BDT week. Splatted into the keywords of an
+ephemeris:
 
     GPSEphemeris(; prn, ..., navigation_times('G'; week, transmission_time, toe, toc)...)
 
@@ -99,13 +99,13 @@ the week that puts it within half a week of the broadcast, as RTKLIB's
     week after reads past the end of the week.
 """
 function navigation_times(
-    system::Char;
+    satellite_system::Char;
     week::Integer,
     transmission_time::Real,
     toe::Real,
     toc::Real,
 )
-    broadcast_week, origin = record_week(system, week)
+    broadcast_week, origin = record_week(satellite_system, week)
     toe_week = reference_week(broadcast_week, transmission_time, toe)
     toc_week = reference_week(broadcast_week, transmission_time, toc)
     (;

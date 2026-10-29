@@ -114,8 +114,8 @@ end
   `set_header!(writer, header)` until the first ephemeris is written, for
   ionosphere and UTC parameters that decode later.
 - `satellite_system = 'G'` pins the file to one constellation; without it the
-  file is mixed. `nav_satellite_system(systems)` gives the one for a file of
-  `systems`.
+  file is mixed. `nav_satellite_system(satellite_systems)` gives the one for a
+  file of `satellite_systems`.
 - A value that does not fit its field, or is not finite, is rejected; a
   writer created with `overflow = :skip` leaves the record out instead.
 - Other constellations can be written by implementing the

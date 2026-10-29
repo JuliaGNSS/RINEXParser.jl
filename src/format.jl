@@ -173,7 +173,7 @@ check_header_field(value::AbstractString, width::Int, description) =
         ),
     )
 
-const SYSTEM_NAMES = Dict(
+const SATELLITE_SYSTEM_NAMES = Dict(
     'G' => "GPS",
     'R' => "GLONASS",
     'E' => "Galileo",
@@ -184,38 +184,39 @@ const SYSTEM_NAMES = Dict(
 )
 
 """
-    check_satellite_system(sys) -> Char
+    check_satellite_system(satellite_system) -> Char
 
-Return the satellite system character `sys`, or throw an `ArgumentError`
-if it does not name a RINEX constellation.
+Return the satellite system character `satellite_system`, or throw an
+`ArgumentError` if it does not name a RINEX constellation.
 """
-check_satellite_system(sys::Char) =
-    haskey(SYSTEM_NAMES, sys) ? sys :
-    throw(ArgumentError("Unknown satellite system character '$sys'"))
+check_satellite_system(satellite_system::Char) =
+    haskey(SATELLITE_SYSTEM_NAMES, satellite_system) ? satellite_system :
+    throw(ArgumentError("Unknown satellite system character '$satellite_system'"))
 
 """
-    system_character(systems) -> Char
+    system_character(satellite_systems) -> Char
 
-The satellite system a file containing `systems` is written for: the
+The satellite system a file containing `satellite_systems` is written for: the
 character of its constellation if it holds exactly one, `'M'` for a mixed
 file - several systems, or a file that is not pinned to one - otherwise.
 Every character is checked, also in a mixed file where none of them is
 returned.
 """
-function system_character(systems)
-    foreach(check_satellite_system, systems)
-    length(systems) == 1 ? only(systems) : 'M'
+function system_character(satellite_systems)
+    foreach(check_satellite_system, satellite_systems)
+    length(satellite_systems) == 1 ? only(satellite_systems) : 'M'
 end
 
 """
-    system_identification(systems) -> String
+    system_identification(satellite_systems) -> String
 
 The satellite-system field of the `RINEX VERSION / TYPE` record, derived
-from the set of system characters contained in the file.
+from the set of satellite system characters contained in the file.
 """
-function system_identification(systems)
-    sys = system_character(systems)
-    sys == 'M' ? "M: Mixed" : string(sys, ": ", SYSTEM_NAMES[sys])
+function system_identification(satellite_systems)
+    satellite_system = system_character(satellite_systems)
+    satellite_system == 'M' ? "M: Mixed" :
+    string(satellite_system, ": ", SATELLITE_SYSTEM_NAMES[satellite_system])
 end
 
 # Time systems of the constellations, as the three-letter codes of the
@@ -232,31 +233,31 @@ const TIME_SYSTEMS = Dict(
 )
 
 """
-    time_system(systems) -> String
+    time_system(satellite_systems) -> String
     time_system(header::RinexObsHeader) -> String
 
-Time system of the epochs of an observation file containing `systems` - the
-satellite system characters, or those of the `obs_codes` of `header` - as the
-three-letter code of the `TIME OF FIRST OBS` record: `"GPS"`, `"GLO"`,
-`"GAL"`, `"BDT"`, `"QZS"` or `"IRN"`. A single-constellation file is written
-in that constellation's time system; a file carrying several constellations
-uses GPS time, as RINEX prescribes for mixed files. Every epoch passed to
+Time system of the epochs of an observation file containing `satellite_systems`,
+the satellite system characters, or those of the `obs_codes` of `header`, as the
+three-letter code of the `TIME OF FIRST OBS` record: `"GPS"`, `"GLO"`, `"GAL"`,
+`"BDT"`, `"QZS"` or `"IRN"`. A single-constellation file is written in that
+constellation's time system; a file carrying several constellations uses GPS
+time, as RINEX prescribes for mixed files. Every epoch passed to
 [`write_epoch!`](@ref) has to be in this time system.
 
 With GNSSSignals loaded, `time_system(GNSSSignals.BDT())` gives the code of a
 GNSSSignals time system - `"GPS"`, `"GAL"` or `"BDT"` - and
 [`gnss_time_system`](@ref) the time system of a code.
 """
-function time_system(systems)
-    length(systems) == 1 || return "GPS"
-    TIME_SYSTEMS[check_satellite_system(only(systems))]
+function time_system(satellite_systems)
+    length(satellite_systems) == 1 || return "GPS"
+    TIME_SYSTEMS[check_satellite_system(only(satellite_systems))]
 end
 
-function version_type_line(io::IO, file_type::AbstractString, systems)
+function version_type_line(io::IO, file_type::AbstractString, satellite_systems)
     content =
         rpad(@sprintf("%9.2f", RINEX_VERSION), 20) *
         rpad(file_type, 20) *
-        system_identification(systems)
+        system_identification(satellite_systems)
     header_line(io, content, "RINEX VERSION / TYPE")
 end
 
@@ -266,31 +267,32 @@ function program_line(io::IO, program, run_by)
     header_line(io, content, "PGM / RUN BY / DATE")
 end
 
-satellite_id(system::Char, prn::Integer) = string(system, lpad(prn, 2, '0'))
+satellite_id(satellite_system::Char, prn::Integer) =
+    string(satellite_system, lpad(prn, 2, '0'))
 
 """
-    check_satellite_number(system, prn) -> Int
+    check_satellite_number(satellite_system, prn) -> Int
 
 Return the satellite number `prn`, or throw an `ArgumentError` if it is
 outside the 1-99 of the two columns of a satellite identification.
 """
-check_satellite_number(system::Char, prn::Integer) =
+check_satellite_number(satellite_system::Char, prn::Integer) =
     0 < prn < 100 ? Int(prn) :
     throw(
         ArgumentError(
-            "Satellite number $prn of system '$system' does not fit the two columns " *
-            "of a RINEX satellite identification, which holds 1-99",
+            "Satellite number $prn of satellite system '$satellite_system' does not " *
+            "fit the two columns of a RINEX satellite identification, which holds 1-99",
         ),
     )
 
 """
-    add_satellite_id!(record, system, prn)
+    add_satellite_id!(record, satellite_system, prn)
 
 Append the three-column satellite identification that opens a data record.
 """
-function add_satellite_id!(record::RecordBuffer, system::Char, prn::Integer)
-    check_satellite_number(system, prn)
-    add_char!(record, system)
+function add_satellite_id!(record::RecordBuffer, satellite_system::Char, prn::Integer)
+    check_satellite_number(satellite_system, prn)
+    add_char!(record, satellite_system)
     add_integer!(record, prn, 2, UInt8('0'))
 end
 

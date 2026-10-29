@@ -128,10 +128,9 @@ signals approximated as BOC(1,1) and their CBOC originals - give it once.
 function observation_codes(signals; types = OBSERVATION_TYPES)
     obs_codes = Pair{Char,Vector{String}}[]
     for signal in signals
-        system = satellite_system(signal)
-        index = findfirst(entry -> first(entry) == system, obs_codes)
+        index = findfirst(entry -> first(entry) == satellite_system(signal), obs_codes)
         if isnothing(index)
-            push!(obs_codes, system => String[])
+            push!(obs_codes, satellite_system(signal) => String[])
             index = lastindex(obs_codes)
         end
         codes = last(obs_codes[index])

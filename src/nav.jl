@@ -125,19 +125,19 @@ Base.@kwdef mutable struct RinexNavHeader
 end
 
 """
-    nav_satellite_system(systems) -> Union{Nothing,Char}
+    nav_satellite_system(satellite_systems) -> Union{Nothing,Char}
 
-The `satellite_system` of a [`RinexNavHeader`](@ref) for a file that may
-carry ephemerides of `systems`, the satellite system characters: the one
+The `satellite_system` of a [`RinexNavHeader`](@ref) for a file that may carry
+ephemerides of `satellite_systems`, the satellite system characters: the one
 system of a single-constellation file, `nothing` for a mixed one. Every
-character is checked, also for a mixed file. Settled from the
-constellations a file can carry rather than those seen so far, it does not
-reject a second constellation that shows up later.
+character is checked, also for a mixed file. Settled from the constellations a
+file can carry rather than those seen so far, it does not reject a second
+constellation that shows up later.
 
     RinexNavHeader(; satellite_system = nav_satellite_system(['G', 'E']))  # mixed
 """
-function nav_satellite_system(systems)
-    distinct = unique(map(check_satellite_system, systems))
+function nav_satellite_system(satellite_systems)
+    distinct = unique(map(check_satellite_system, satellite_systems))
     length(distinct) == 1 ? only(distinct) : nothing
 end
 
@@ -567,8 +567,8 @@ function write_nav_header(writer::RinexNavWriter)
     header = writer.header
     # Checked again, as in `write_obs_header`.
     check_nav_header(header)
-    systems = isnothing(header.satellite_system) ? () : (header.satellite_system,)
-    version_type_line(io, "N: GNSS NAV DATA", systems)
+    satellite_systems = isnothing(header.satellite_system) ? () : (header.satellite_system,)
+    version_type_line(io, "N: GNSS NAV DATA", satellite_systems)
     program_line(io, header.program, header.run_by)
     for corr in header.ionospheric_corrections
         content =
@@ -623,7 +623,7 @@ orbit_value(::Nothing) = nothing
 orbit_value(value::Real) = Float64(value)
 
 # Line 0 is the clock polynomial at the end of the record epoch line.
-function ephemeris_field_problem(system, prn, (line_number, i, value))
+function ephemeris_field_problem(satellite_system, prn, (line_number, i, value))
     position =
         line_number == 0 ? "the clock polynomial" : "broadcast orbit line $line_number"
     reason =
@@ -633,7 +633,7 @@ function ephemeris_field_problem(system, prn, (line_number, i, value))
         "is not finite, and a navigation record field has no encoding for a value " *
         "that is missing"
     "Field $i of $position of the ephemeris of satellite " *
-    "$(satellite_id(system, prn)) is $value, which $reason"
+    "$(satellite_id(satellite_system, prn)) is $value, which $reason"
 end
 
 function broadcast_orbit_line(record::RecordBuffer, line_number::Int, values)
@@ -644,8 +644,14 @@ function broadcast_orbit_line(record::RecordBuffer, line_number::Int, values)
 end
 
 # Reject the record, or with `overflow = :skip` leave it out and say so once.
-@noinline function reject_ephemeris(writer::RinexNavWriter, key, system, prn, field)
-    problem = ephemeris_field_problem(system, prn, field)
+@noinline function reject_ephemeris(
+    writer::RinexNavWriter,
+    key,
+    satellite_system,
+    prn,
+    field,
+)
+    problem = ephemeris_field_problem(satellite_system, prn, field)
     writer.overflow == :skip || throw(ArgumentError(problem))
     push!(writer.skipped, key)
     @warn "$problem, so the record is left out of the file"
@@ -671,25 +677,25 @@ function write_ephemeris!(writer::RinexNavWriter, eph)
         pinned == satellite_system(eph) ||
         throw(
             ArgumentError(
-                "Satellite $(satellite_id(satellite_system(eph), eph.prn)) does not belong to " *
-                "system '$pinned' of the single-system header; leave the header's " *
-                "satellite_system as nothing to write a mixed navigation file",
+                "Satellite $(satellite_id(satellite_system(eph), eph.prn)) does not " *
+                "belong to satellite system '$pinned' of the single-system header; " *
+                "leave the header's satellite_system as nothing to write a mixed " *
+                "navigation file",
             ),
         )
     key = dedupe_key(eph)
     (key in writer.written || key in writer.skipped) && return false
-    sys = satellite_system(eph)
     prn = eph.prn
     t = eph.toc
     # The record epoch holds whole seconds (`I2`).
     iszero(millisecond(t)) || throw(
         ArgumentError(
-            "The toc of $(satellite_id(sys, prn)) is $t, but the epoch of a " *
-            "navigation record holds whole seconds",
+            "The toc of $(satellite_id(satellite_system(eph), prn)) is $t, but the " *
+            "epoch of a navigation record holds whole seconds",
         ),
     )
     record = start_record!(writer.record)
-    add_satellite_id!(record, sys, prn)
+    add_satellite_id!(record, satellite_system(eph), prn)
     add_char!(record, ' ')
     add_epoch_date!(record, t)
     add_char!(record, ' ')
@@ -700,7 +706,8 @@ function write_ephemeris!(writer::RinexNavWriter, eph)
         isnothing(problem) || break
         problem = broadcast_orbit_line(record, line_number, line)
     end
-    isnothing(problem) || return reject_ephemeris(writer, key, sys, prn, problem)
+    isnothing(problem) ||
+        return reject_ephemeris(writer, key, satellite_system(eph), prn, problem)
     writer.header_written || write_nav_header(writer)
     flush_record!(writer.io, record)
     push!(writer.written, key)

@@ -1,20 +1,20 @@
 const MAX_PHASE_SHIFT_SATELLITES = 99
 
 """
-    check_phase_shift_satellites(system, code, satellites) -> satellites
+    check_phase_shift_satellites(satellite_system, code, satellites) -> satellites
 
 Return the satellite list of a [`PhaseShift`](@ref), or throw an
 `ArgumentError` if the record cannot hold it. The list is a `Vector`, so it
 stays open to `push!` after the shift was constructed; the header writer
 therefore checks it again, and this is what both of them call.
 """
-function check_phase_shift_satellites(system::Char, code, satellites)
-    foreach(prn -> check_satellite_number(system, prn), satellites)
+function check_phase_shift_satellites(satellite_system::Char, code, satellites)
+    foreach(prn -> check_satellite_number(satellite_system, prn), satellites)
     # The list is counted into an `I2.2` field, and the count is what tells
     # a reader how many of the identifications that follow to read.
     length(satellites) <= MAX_PHASE_SHIFT_SATELLITES || throw(
         ArgumentError(
-            "The phase shift of $system $code names $(length(satellites)) " *
+            "The phase shift of $satellite_system $code names $(length(satellites)) " *
             "satellites, but the record counts them in two columns, which holds " *
             "$MAX_PHASE_SHIFT_SATELLITES; leave the list empty to name every " *
             "satellite of the system",
@@ -48,10 +48,10 @@ const OBSERVATION_CODE_TABLES =
     Dict('G' => 14, 'R' => 15, 'E' => 16, 'S' => 17, 'J' => 18, 'C' => 19, 'I' => 20)
 
 """
-    check_observation_code(system, code) -> code
+    check_observation_code(satellite_system, code) -> code
 
 Return the observation code `code`, or throw an `ArgumentError` if
-RINEX 3.05 does not define it for `system`. A code is a type, a band
+RINEX 3.05 does not define it for `satellite_system`. A code is a type, a band
 and an attribute, and only the combinations of Tables 14-20 are known
 tracking modes, which section 5.2.17 makes the only ones a file may carry:
 BDS B1I is `2I` rather than `1I`, and Galileo E5b and BDS B2b share band 7
@@ -59,10 +59,10 @@ under attributes of their own. The one other code the format admits
 is the receiver channel number `X`, whose attribute is blank (section
 5.3.4).
 """
-function check_observation_code(system::Char, code::AbstractString)
-    name = SYSTEM_NAMES[system]
-    table = "RINEX 3.05 Table $(OBSERVATION_CODE_TABLES[system])"
-    signals = OBSERVATION_SIGNALS[system]
+function check_observation_code(satellite_system::Char, code::AbstractString)
+    name = SATELLITE_SYSTEM_NAMES[satellite_system]
+    table = "RINEX 3.05 Table $(OBSERVATION_CODE_TABLES[satellite_system])"
+    signals = OBSERVATION_SIGNALS[satellite_system]
     bands = join(first.(signals), ", ")
     (length(code) == 3 && first(code) in "CLDSX") || throw(
         ArgumentError(
@@ -93,7 +93,7 @@ function check_observation_code(system::Char, code::AbstractString)
                 "is tracked with the attributes $(join(attributes, ", "))",
             ),
         )
-    elseif type == 'C' && system == 'G' && attribute == 'N'
+    elseif type == 'C' && satellite_system == 'G' && attribute == 'N'
         throw(
             ArgumentError(
                 "Observation code \"$code\" is a pseudorange of the codeless " *
@@ -107,14 +107,14 @@ end
 
 # Return the observation code `code` if it is a carrier phase of `system`,
 # which is what a phase shift and the alignment of Table A23 are given for.
-function check_carrier_phase_code(system::Char, code::AbstractString)
+function check_carrier_phase_code(satellite_system::Char, code::AbstractString)
     startswith(code, "L") || throw(
         ArgumentError(
             "A phase shift corrects a carrier phase, so \"$code\" is not a code " *
             "it can be given for; carrier phase codes start with \"L\"",
         ),
     )
-    check_observation_code(system, code)
+    check_observation_code(satellite_system, code)
 end
 
 # RINEX 3.05 Table A23: per system, the groups of carrier phases aligned to
@@ -190,39 +190,39 @@ const PHASE_ALIGNMENT_GROUPS = Dict(
 # The groups above keyed by `(system, code)`, each code with the reference
 # of its group and its correction.
 const PHASE_ALIGNMENT = Dict{Tuple{Char,String},Tuple{String,Union{Nothing,Float64}}}(
-    (system, code) => (first(first(group)), correction) for
-    (system, groups) in PHASE_ALIGNMENT_GROUPS for group in groups for
+    (satellite_system, code) => (first(first(group)), correction) for
+    (satellite_system, groups) in PHASE_ALIGNMENT_GROUPS for group in groups for
     (code, correction) in group
 )
 
 # The reference and correction of the carrier phase `code` of `system`, or
 # `nothing` for a code the table leaves out.
-function phase_alignment_entry(system::Char, code::AbstractString)
-    check_satellite_system(system)
-    check_carrier_phase_code(system, code)
-    get(PHASE_ALIGNMENT, (system, String(code)), nothing)
+function phase_alignment_entry(satellite_system::Char, code::AbstractString)
+    check_satellite_system(satellite_system)
+    check_carrier_phase_code(satellite_system, code)
+    get(PHASE_ALIGNMENT, (satellite_system, String(code)), nothing)
 end
 
 """
-    reference_code(system, code) -> Union{String,Nothing}
+    reference_code(satellite_system, code) -> Union{String,Nothing}
 
-The reference signal that RINEX 3.05 Table A23 gives the band of the
-carrier phase `code` of `system`. This is the signal the phase is aligned
-to: `"L2P"` for GPS `L2S`, `"L1B"` for Galileo `L1C`, and `code` itself for
-a reference signal. A band can hold more than one group, each with its own
-reference: BDS B1C and B1A share band 1 with `L1D` and `L1S`. `nothing` is
-a code the table states no alignment for (see [`phase_correction`](@ref)).
+The reference signal that RINEX 3.05 Table A23 gives the band of the carrier
+phase `code` of `satellite_system`. This is the signal the phase is aligned to:
+`"L2P"` for GPS `L2S`, `"L1B"` for Galileo `L1C`, and `code` itself for a
+reference signal. A band can hold more than one group, each with its own
+reference: BDS B1C and B1A share band 1 with `L1D` and `L1S`. `nothing` is a
+code the table states no alignment for (see [`phase_correction`](@ref)).
 """
-function reference_code(system::Char, code::AbstractString)
-    found = phase_alignment_entry(system, code)
+function reference_code(satellite_system::Char, code::AbstractString)
+    found = phase_alignment_entry(satellite_system, code)
     isnothing(found) ? nothing : first(found)
 end
 
 """
-    phase_correction(system, code) -> Union{Float64,Nothing}
+    phase_correction(satellite_system, code) -> Union{Float64,Nothing}
 
-The correction in cycles that RINEX 3.05 Table A23 gives for the carrier
-phase `code` of `system`, as the satellite issues it, to align it with the
+The correction in cycles that RINEX 3.05 Table A23 gives for the carrier phase
+`code` of `satellite_system`, as the satellite issues it, to align it with the
 reference signal of its band: `-0.25` for GPS `L2S`, `0.5` for Galileo `L1C`.
 The sign follows section 5.2.12, φ_RINEX = φ_original + Δφ.
 
@@ -237,16 +237,16 @@ Galileo A and Z signals, QZSS `L1B` and `L1Z`, NavIC `L5B` and `L9B`).
 
 See [`PhaseShift`](@ref) for which codes a header has to state a shift for.
 """
-function phase_correction(system::Char, code::AbstractString)
-    found = phase_alignment_entry(system, code)
+function phase_correction(satellite_system::Char, code::AbstractString)
+    found = phase_alignment_entry(satellite_system, code)
     isnothing(found) ? nothing : last(found)
 end
 
 """
-    PhaseShift(system, code, correction; satellites = Int[])
+    PhaseShift(satellite_system, code, correction; satellites = Int[])
 
 One `SYS / PHASE SHIFT` header record: the correction in cycles that was
-applied to the carrier phase `code` of `system` to align it with the
+applied to the carrier phase `code` of `satellite_system` to align it with the
 reference signal of its band (RINEX 3.05 Table A23). `satellites` names the
 satellite numbers the correction applies to; an empty list means every
 satellite of the system, which is the usual case.
@@ -273,36 +273,40 @@ A reference signal takes no correction other than zero. A shift limited to
 `satellites` leaves the others of the system reading as zero.
 """
 struct PhaseShift
-    system::Char
+    satellite_system::Char
     code::String
     correction::Float64
     satellites::Vector{Int}
-    function PhaseShift(system, code, correction, satellites)
-        check_satellite_system(system)
-        check_carrier_phase_code(system, code)
+    function PhaseShift(satellite_system, code, correction, satellites)
+        check_satellite_system(satellite_system)
+        check_carrier_phase_code(satellite_system, code)
         correction = Float64(correction)
         fits_fixed_field(correction, 5, 8) ||
-            fixed_field_error("Phase shift of $system $code", correction, 5, 8)
+            fixed_field_error("Phase shift of $satellite_system $code", correction, 5, 8)
         # The reference is what the other phases of its band are aligned to,
         # so it cannot have been shifted against itself.
-        found = get(PHASE_ALIGNMENT, (system, String(code)), nothing)
+        found = get(PHASE_ALIGNMENT, (satellite_system, String(code)), nothing)
         (iszero(correction) || isnothing(found) || first(found) != code) || throw(
             ArgumentError(
-                "$system $code is the reference signal of its band in RINEX 3.05 " *
-                "Table A23, which section 5.2.12 leaves uncorrected, so its phase " *
+                "$satellite_system $code is the reference signal of its band in RINEX " *
+                "3.05 Table A23, which section 5.2.12 leaves uncorrected, so its phase " *
                 "shift cannot be $correction cycles",
             ),
         )
         new(
-            system,
+            satellite_system,
             String(code),
             correction,
-            check_phase_shift_satellites(system, code, collect(Int, satellites)),
+            check_phase_shift_satellites(satellite_system, code, collect(Int, satellites)),
         )
     end
 end
-PhaseShift(system::Char, code::AbstractString, correction::Real; satellites = Int[]) =
-    PhaseShift(system, code, correction, satellites)
+PhaseShift(
+    satellite_system::Char,
+    code::AbstractString,
+    correction::Real;
+    satellites = Int[],
+) = PhaseShift(satellite_system, code, correction, satellites)
 
 """
     RinexObsHeader(; obs_codes, kwargs...)
@@ -454,13 +458,13 @@ signal_strength_indicator(cn0::Real) =
     isfinite(cn0) ? floor(Int, clamp(cn0, 6, 54) / 6) : nothing
 
 """
-    SatObs(system, prn, observations)
-    SatObs(header, system, prn, "C1C" => value, "L1C" => value, ...)
+    SatObs(satellite_system, prn, observations)
+    SatObs(header, satellite_system, prn, "C1C" => value, "L1C" => value, ...)
 
 Observations of one satellite in one epoch.
 
 The first form takes the observations aligned with the header's `obs_codes`
-list for `system`, using `nothing` for observation codes without a
+list for `satellite_system`, using `nothing` for observation codes without a
 measurement. The second form addresses them by observation code
 instead and derives the alignment from `header` (a [`RinexObsHeader`](@ref)
 or a [`RinexObsWriter`](@ref)), which cannot be misaligned:
@@ -474,18 +478,22 @@ does not mention are left blank. Codes may also be given as symbols
 (`:C1C`), and as any iterable of pairs instead of separate arguments.
 """
 struct SatObs
-    system::Char
+    satellite_system::Char
     prn::Int
     observations::Vector{Union{Nothing,ObsValue}}
 end
-SatObs(system::Char, prn::Integer, observations::AbstractVector) =
-    SatObs(system, Int(prn), Vector{Union{Nothing,ObsValue}}(observations))
+SatObs(satellite_system::Char, prn::Integer, observations::AbstractVector) =
+    SatObs(satellite_system, Int(prn), Vector{Union{Nothing,ObsValue}}(observations))
 
-SatObs(header::RinexObsHeader, system::Char, prn::Integer, observations::Pair...) =
-    SatObs(header, system, prn, observations)
+SatObs(
+    header::RinexObsHeader,
+    satellite_system::Char,
+    prn::Integer,
+    observations::Pair...,
+) = SatObs(header, satellite_system, prn, observations)
 
-function SatObs(header::RinexObsHeader, system::Char, prn::Integer, observations)
-    codes = obs_codes_for(header, system)
+function SatObs(header::RinexObsHeader, satellite_system::Char, prn::Integer, observations)
+    codes = obs_codes_for(header, satellite_system)
     values = Vector{Union{Nothing,ObsValue}}(nothing, length(codes))
     given = falses(length(codes))
     for observation in observations
@@ -494,7 +502,7 @@ function SatObs(header::RinexObsHeader, system::Char, prn::Integer, observations
                 "Observations addressed by observation code are given as " *
                 "\"C1C\" => value pairs, not as $(typeof(observation)); the form " *
                 "taking a vector aligned with the header's obs_codes is " *
-                "SatObs(system, prn, observations)",
+                "SatObs(satellite_system, prn, observations)",
             ),
         )
         code, value = observation
@@ -502,8 +510,8 @@ function SatObs(header::RinexObsHeader, system::Char, prn::Integer, observations
         index = findfirst(==(code), codes)
         isnothing(index) && throw(
             ArgumentError(
-                "Observation code \"$code\" is not declared for system '$system' in " *
-                "the header, which carries $(join(codes, ", "))",
+                "Observation code \"$code\" is not declared for satellite system " *
+                "'$satellite_system' in the header, which carries $(join(codes, ", "))",
             ),
         )
         given[index] &&
@@ -511,7 +519,7 @@ function SatObs(header::RinexObsHeader, system::Char, prn::Integer, observations
         given[index] = true
         values[index] = obs_value(value)
     end
-    SatObs(system, Int(prn), values)
+    SatObs(satellite_system, Int(prn), values)
 end
 
 # The two halves of an observation pair, each answering what it does not
@@ -701,19 +709,20 @@ function check_obs_header(header::RinexObsHeader)
     # Data lines are matched to the first list of their system, so a second
     # list of a system, or a second entry of a code, would describe columns
     # no data line has.
-    for (i, (system, codes)) in enumerate(header.obs_codes)
-        check_satellite_system(system)
-        any(p -> first(p) == system, view(header.obs_codes, 1:(i-1))) && throw(
+    for (i, (satellite_system, codes)) in enumerate(header.obs_codes)
+        check_satellite_system(satellite_system)
+        any(p -> first(p) == satellite_system, view(header.obs_codes, 1:(i-1))) && throw(
             ArgumentError(
-                "The header lists observation codes for system '$system' twice; " *
-                "give all of them in one list",
+                "The header lists observation codes for satellite system " *
+                "'$satellite_system' twice; give all of them in one list",
             ),
         )
         for (j, code) in enumerate(codes)
-            check_observation_code(system, code)
+            check_observation_code(satellite_system, code)
             code in view(codes, 1:(j-1)) && throw(
                 ArgumentError(
-                    "Observation code \"$code\" is declared twice for system '$system'",
+                    "Observation code \"$code\" is declared twice for satellite system " *
+                    "'$satellite_system'",
                 ),
             )
         end
@@ -748,25 +757,28 @@ function check_obs_header(header::RinexObsHeader)
             fixed_field_error("A GLONASS code-phase bias", bias, 3, 8)
     end
     for (i, shift) in enumerate(header.phase_shifts)
-        check_phase_shift_satellites(shift.system, shift.code, shift.satellites)
-        codes = obs_codes_for(header, shift.system)
+        check_phase_shift_satellites(shift.satellite_system, shift.code, shift.satellites)
+        codes = obs_codes_for(header, shift.satellite_system)
         shift.code in codes || throw(
             ArgumentError(
-                "The phase shift of $(shift.system) $(shift.code) names an " *
-                "observation code the header does not declare for system " *
-                "'$(shift.system)'; it declares $(join(codes, ", "))",
+                "The phase shift of $(shift.satellite_system) $(shift.code) names an " *
+                "observation code the header does not declare for satellite system " *
+                "'$(shift.satellite_system)'; it declares $(join(codes, ", "))",
             ),
         )
         # One code may carry several records, one per group of satellites,
         # but a satellite cannot be told two corrections for the same phase
         # - and an empty list already claims all of them.
         for other in view(header.phase_shifts, 1:(i-1))
-            (other.system == shift.system && other.code == shift.code) || continue
+            (
+                other.satellite_system == shift.satellite_system &&
+                other.code == shift.code
+            ) || continue
             overlap = shared_satellites(shift, other)
             isempty(overlap) || throw(
                 ArgumentError(
-                    "Two phase shifts of $(shift.system) $(shift.code) apply to " *
-                    "$overlap, which would tell it two corrections for one " *
+                    "Two phase shifts of $(shift.satellite_system) $(shift.code) apply " *
+                    "to $overlap, which would tell it two corrections for one " *
                     "carrier phase",
                 ),
             )
@@ -775,14 +787,17 @@ function check_obs_header(header::RinexObsHeader)
     # A phase code no shift names is written blank, which says it needed no
     # correction. A shift for some of the satellites names it as well, see
     # `PhaseShift`.
-    for (system, codes) in header.obs_codes, code in codes
+    for (satellite_system, codes) in header.obs_codes, code in codes
         # Only the carrier phases Table A23 gives "None" or states no
         # alignment for can be written blank.
-        found = get(PHASE_ALIGNMENT, (system, code), nothing)
+        found = get(PHASE_ALIGNMENT, (satellite_system, code), nothing)
         isnothing(found) && continue
         reference, correction = found
         (!isnothing(correction) && iszero(correction)) && continue
-        any(s -> s.system == system && s.code == code, header.phase_shifts) && continue
+        any(
+            s -> s.satellite_system == satellite_system && s.code == code,
+            header.phase_shifts,
+        ) && continue
         alignment =
             isnothing(correction) ?
             "requires it aligned to $reference, without a correction that holds " *
@@ -790,11 +805,11 @@ function check_obs_header(header::RinexObsHeader)
             "aligns it to $reference with a correction of $correction cycles"
         throw(
             ArgumentError(
-                "$(SYSTEM_NAMES[system]) carrier phase $code needs a PhaseShift: " *
-                "without one its SYS / PHASE SHIFT record is blank, which says it " *
-                "needed no correction, but RINEX 3.05 Table A23 $alignment. State " *
-                "the correction that was applied to align it, or 0.0 if it arrived " *
-                "aligned",
+                "$(SATELLITE_SYSTEM_NAMES[satellite_system]) carrier phase $code needs a " *
+                "PhaseShift: without one its SYS / PHASE SHIFT record is blank, which " *
+                "says it needed no correction, but RINEX 3.05 Table A23 $alignment. " *
+                "State the correction that was applied to align it, or 0.0 if it " *
+                "arrived aligned",
             ),
         )
     end
@@ -807,7 +822,7 @@ function shared_satellites(a::PhaseShift, b::PhaseShift)
     (isempty(a.satellites) || isempty(b.satellites)) &&
         return "every satellite of the system"
     shared = sort(intersect(a.satellites, b.satellites))
-    join(map(prn -> satellite_id(a.system, prn), shared), ", ")
+    join(map(prn -> satellite_id(a.satellite_system, prn), shared), ", ")
 end
 
 function Base.close(writer::RinexObsWriter)
@@ -902,12 +917,12 @@ SatObs(writer::RinexObsWriter, args...) = SatObs(writer.header, args...)
 
 time_system(header::RinexObsHeader) = time_system(first.(header.obs_codes))
 
-function obs_codes_for(header::RinexObsHeader, system::Char)
-    index = findfirst(p -> first(p) == system, header.obs_codes)
+function obs_codes_for(header::RinexObsHeader, satellite_system::Char)
+    index = findfirst(p -> first(p) == satellite_system, header.obs_codes)
     isnothing(index) && throw(
         ArgumentError(
-            "The header declares no observation codes for system '$system'; it " *
-            "carries the systems " *
+            "The header declares no observation codes for satellite system " *
+            "'$satellite_system'; it carries the satellite systems " *
             join(map(p -> "'$(first(p))'", header.obs_codes), ", "),
         ),
     )
@@ -939,9 +954,9 @@ function write_obs_header(writer::RinexObsWriter, first_epoch_time, first_epoch_
     end
     content = join(Printf.format(FMT_F14_4, x) for x in header.antenna_delta_hen)
     header_line(io, content, "ANTENNA: DELTA H/E/N")
-    for (system, codes) in header.obs_codes
+    for (satellite_system, codes) in header.obs_codes
         for (i, chunk) in enumerate(Iterators.partition(codes, 13))
-            lead = i == 1 ? string(system, "  ", lpad(length(codes), 3)) : " "^6
+            lead = i == 1 ? string(satellite_system, "  ", lpad(length(codes), 3)) : " "^6
             header_line(io, lead * join(" " .* chunk), "SYS / # / OBS TYPES")
         end
     end
@@ -981,17 +996,17 @@ function write_obs_header(writer::RinexObsWriter, first_epoch_time, first_epoch_
     # One record per carrier phase, which the format makes mandatory: the
     # correction that aligned it, or a blank saying it needed none. See
     # `PhaseShift` for what each of them claims.
-    for (system, codes) in header.obs_codes, code in codes
+    for (satellite_system, codes) in header.obs_codes, code in codes
         startswith(code, "L") || continue
         stated = false
         # A code may carry more than one record, because a correction need
         # not apply to every satellite of the system.
         for shift in header.phase_shifts
-            (shift.system == system && shift.code == code) || continue
-            phase_shift_lines(io, system, code, shift)
+            (shift.satellite_system == satellite_system && shift.code == code) || continue
+            phase_shift_lines(io, satellite_system, code, shift)
             stated = true
         end
-        stated || phase_shift_lines(io, system, code, nothing)
+        stated || phase_shift_lines(io, satellite_system, code, nothing)
     end
     glonass_slot_lines(io, header.glonass_slots)
     glonass_bias_line(io, header.glonass_code_phase_biases)
@@ -1032,11 +1047,17 @@ glonass_bias_line(io::IO, biases::NTuple{4,Float64}) = header_line(
 # more than ten of them are named.
 const PHASE_SHIFT_SATELLITES_PER_LINE = 10
 
-function phase_shift_lines(io::IO, system::Char, code::AbstractString, ::Nothing)
-    header_line(io, string(system, ' ', code), "SYS / PHASE SHIFT")
+function phase_shift_lines(io::IO, satellite_system::Char, code::AbstractString, ::Nothing)
+    header_line(io, string(satellite_system, ' ', code), "SYS / PHASE SHIFT")
 end
-function phase_shift_lines(io::IO, system::Char, code::AbstractString, shift::PhaseShift)
-    lead = string(system, ' ', code, ' ') * Printf.format(FMT_F8_5, shift.correction)
+function phase_shift_lines(
+    io::IO,
+    satellite_system::Char,
+    code::AbstractString,
+    shift::PhaseShift,
+)
+    lead =
+        string(satellite_system, ' ', code, ' ') * Printf.format(FMT_F8_5, shift.correction)
     if isempty(shift.satellites)
         return header_line(io, lead, "SYS / PHASE SHIFT")
     end
@@ -1047,7 +1068,7 @@ function phase_shift_lines(io::IO, system::Char, code::AbstractString, shift::Ph
         enumerate(Iterators.partition(shift.satellites, PHASE_SHIFT_SATELLITES_PER_LINE))
         content =
             (i == 1 ? lead : " "^18) *
-            join(' ' * satellite_id(system, prn) for prn in chunk)
+            join(' ' * satellite_id(satellite_system, prn) for prn in chunk)
         header_line(io, content, "SYS / PHASE SHIFT")
     end
     nothing
@@ -1077,16 +1098,17 @@ function add_observation!(
 )
     (something(obs.lli, 0) == 0 || first(code) == 'L') || throw(
         ArgumentError(
-            "Observation $code of satellite $(satellite_id(sat.system, sat.prn)) " *
-            "carries the loss-of-lock indicator $(obs.lli), but the indicator is " *
-            "defined for carrier phase observations only",
+            "Observation $code of satellite " *
+            "$(satellite_id(sat.satellite_system, sat.prn)) carries the loss-of-lock " *
+            "indicator $(obs.lli), but the indicator is defined for carrier phase " *
+            "observations only",
         ),
     )
     isfinite(obs.value) || return add_blanks!(record, 16)
     if !fits_fixed_field(obs.value, 3, 14)
-        description = "Observation $code of satellite $(satellite_id(sat.system, sat.prn))"
+        description = "Observation $code of satellite $(satellite_id(sat.satellite_system, sat.prn))"
         writer.overflow == :blank || fixed_field_error(description, obs.value, 3, 14)
-        warn_blanked(writer, (sat.system, code), description, obs.value, 3, 14)
+        warn_blanked(writer, (sat.satellite_system, code), description, obs.value, 3, 14)
         return add_blanks!(record, 16)
     end
     add_field!(record, FMT_F14_3, obs.value)
@@ -1145,7 +1167,7 @@ function write_epoch!(writer::RinexObsWriter, epoch::ObsEpoch)
         )
     end
     for sat in epoch.satellites
-        sat.system != 'R' ||
+        sat.satellite_system != 'R' ||
             any(p -> first(p) == sat.prn, writer.header.glonass_slots) ||
             throw(
                 ArgumentError(
@@ -1153,17 +1175,18 @@ function write_epoch!(writer::RinexObsWriter, epoch::ObsEpoch)
                     "but the header's glonass_slots gives no frequency channel for it",
                 ),
             )
-        codes = obs_codes_for(writer.header, sat.system)
+        codes = obs_codes_for(writer.header, sat.satellite_system)
         length(sat.observations) == length(codes) || throw(
             ArgumentError(
-                "Satellite $(satellite_id(sat.system, sat.prn)) carries " *
+                "Satellite $(satellite_id(sat.satellite_system, sat.prn)) carries " *
                 "$(length(sat.observations)) observations, but the header declares " *
-                "$(length(codes)) observation codes for system '$(sat.system)'",
+                "$(length(codes)) observation codes for satellite system " *
+                "'$(sat.satellite_system)'",
             ),
         )
         # Full-width lines (no trailing-blank trimming) for the benefit of
         # fixed-column parsers, matching RTKLIB and GNSS-SDR output.
-        add_satellite_id!(record, sat.system, sat.prn)
+        add_satellite_id!(record, sat.satellite_system, sat.prn)
         for (code, obs) in zip(codes, sat.observations)
             add_observation!(writer, record, obs, sat, code)
         end

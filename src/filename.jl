@@ -89,10 +89,10 @@ The fields are
     frequency (`30S`, `01S`, `05M`, `05Z` for 5 Hz, `01C` for 100 Hz), or
     `nothing` for `00U`. Navigation file names have no such field and require
     `nothing`.
-  - `system`, `file_type`: the two characters of the data type, e.g. `'G'`
-    and `'O'` for `GO` (GPS observation), `'M'` and `'N'` for `MN` (mixed
-    navigation). `system` is a constellation character or `'M'` for a mixed
-    file; `file_type` is `'O'`, `'N'` or `'M'` (meteorological), the file
+  - `satellite_system`, `file_type`: the two characters of the data type, e.g.
+    `'G'` and `'O'` for `GO` (GPS observation), `'M'` and `'N'` for `MN` (mixed
+    navigation). `satellite_system` is a constellation character or `'M'` for a
+    mixed file; `file_type` is `'O'`, `'N'` or `'M'` (meteorological), the file
     type of the `RINEX VERSION / TYPE` record.
   - `format`: `"rnx"` for RINEX, `"crx"` for Hatanaka compressed RINEX.
   - `compression`: `"gz"`, `"bz2"`, `"zip"`, or `nothing` for a file that is
@@ -120,7 +120,7 @@ struct RinexFileName
     start_time::DateTime
     period::Union{Nothing,Dates.Period}
     interval::Union{Nothing,Float64}
-    system::Char
+    satellite_system::Char
     file_type::Char
     format::String
     compression::Union{Nothing,String}
@@ -136,7 +136,7 @@ struct RinexFileName
         start_time,
         period,
         interval,
-        system,
+        satellite_system,
         file_type,
         format,
         compression,
@@ -161,7 +161,7 @@ struct RinexFileName
             floor(check_start_time(start_time), Minute),
             field_period(period),
             field_interval(seconds),
-            check_file_system(system, file_type),
+            check_file_satellite_system(satellite_system, file_type),
             file_type,
             check_format(format, file_type),
             check_compression(compression),
@@ -178,7 +178,7 @@ RinexFileName(;
     start_time,
     period = nothing,
     interval = nothing,
-    system = 'M',
+    satellite_system = 'M',
     file_type = 'O',
     format = "rnx",
     compression = nothing,
@@ -191,7 +191,7 @@ RinexFileName(;
     start_time,
     period,
     interval,
-    system,
+    satellite_system,
     file_type,
     format,
     compression,
@@ -314,20 +314,20 @@ function check_file_type(file_type::AbstractChar)
     file_type
 end
 
-function check_file_system(system::AbstractChar, file_type::Char)
-    file_system = uppercase(Char(system))
+function check_file_satellite_system(satellite_system::AbstractChar, file_type::Char)
+    file_satellite_system = uppercase(Char(satellite_system))
     # The data type of a meteorological file is MM: it carries no
     # constellation of its own.
     file_type == 'M' &&
-        file_system != 'M' &&
+        file_satellite_system != 'M' &&
         throw(
             ArgumentError(
                 "The data type of a meteorological file is MM, so its system " *
-                "character is 'M', not '$system'",
+                "character is 'M', not '$satellite_system'",
             ),
         )
-    file_system == 'M' || check_satellite_system(file_system)
-    file_system
+    file_satellite_system == 'M' || check_satellite_system(file_satellite_system)
+    file_satellite_system
 end
 
 function check_format(format, file_type::Char)
@@ -540,7 +540,7 @@ function Base.print(io::IO, name::RinexFileName)
     # Mandatory for observation and meteorological data, not used by
     # navigation files.
     name.file_type == 'N' || push!(fields, frequency_field(name.interval))
-    push!(fields, string(name.system, name.file_type))
+    push!(fields, string(name.satellite_system, name.file_type))
     print(io, join(fields, '_'), '.', name.format)
     isnothing(name.compression) || print(io, '.', name.compression)
     nothing
@@ -591,7 +591,7 @@ function Base.parse(::Type{RinexFileName}, name::AbstractString)
         ),
         period = parse_period(parse(Int, fields[10]), only(uppercase(fields[11]))),
         interval = parse_frequency(fields[12], fields[13], only(fields[15])),
-        system = only(fields[14]),
+        satellite_system = only(fields[14]),
         file_type = only(fields[15]),
         format = fields[16],
         compression = fields[17],
@@ -680,11 +680,11 @@ end
 """
     check_data_type_keywords(keywords, description, source, file_type)
 
-Reject `system` and `file_type` where a header determines them, rather than
-let the header overrule them silently.
+Reject `satellite_system` and `file_type` where a header determines them, rather
+than let the header overrule them silently.
 """
 function check_data_type_keywords(keywords, description, source, file_type::Char)
-    for keyword in (:system, :file_type)
+    for keyword in (:satellite_system, :file_type)
         haskey(keywords, keyword) && throw(
             ArgumentError(
                 "The data type of $description file name follows from its header, " *
@@ -736,10 +736,10 @@ constellation, several name a mixed file - and the data frequency from its
 `interval`. `start_time` defaults to the header's `time_of_first_obs`, which
 a lazily written header may not carry yet.
 
-Any of the fields the header does not determine can be given as a keyword,
-as can `marker_name` to derive the site from another name; `system` and
-`file_type` cannot. A site field given as `nothing` is the one the marker
-name gives.
+Any of the fields the header does not determine can be given as a keyword, as
+can `marker_name` to derive the site from another name; `satellite_system` and
+`file_type` cannot. A site field given as `nothing` is the one the marker name
+gives.
 
     rinex_filename(header, start_time; country = "DEU", period = Day(1))
 """
@@ -771,7 +771,7 @@ function RinexFileName(
         start_time,
         interval = header.interval,
         keywords...,
-        system = system_character(first.(header.obs_codes)),
+        satellite_system = system_character(first.(header.obs_codes)),
         file_type = 'O',
     )
 end
@@ -789,8 +789,8 @@ the site:
 
     rinex_filename(nav_header, start_time; marker_name = obs_header.marker_name)
 
-As for an observation file, `system` and `file_type` cannot be given (pin
-the header's `satellite_system` instead), and a site field given as
+As for an observation file, `satellite_system` and `file_type` cannot be given
+(pin the header's `satellite_system` instead), and a site field given as
 `nothing` is the one the marker name gives.
 """
 function RinexFileName(
@@ -814,7 +814,7 @@ function RinexFileName(
         site_keywords(marker_name, station, monument, receiver, country)...,
         start_time,
         keywords...,
-        system = something(header.satellite_system, 'M'),
+        satellite_system = something(header.satellite_system, 'M'),
         file_type = 'N',
     )
 end

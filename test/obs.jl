@@ -129,7 +129,9 @@
         # The same satellite record as above, built from codes in an
         # order of its own instead of the header's.
         same(a::SatObs, b::SatObs) =
-            a.system == b.system && a.prn == b.prn && a.observations == b.observations
+            a.satellite_system == b.satellite_system &&
+            a.prn == b.prn &&
+            a.observations == b.observations
 
         by_code = SatObs(
             header,
@@ -477,14 +479,14 @@ end
     @test RINEXParser.reference_code('G', "L2C") == "L2P"
     # The quadrature components of BDS B1 and B3 and of GLONASS G3 are among
     # them, unlike the -1/4 of BDS B2 L7Q.
-    for (system, code) in [('C', "L2Q"), ('C', "L6Q"), ('R', "L3Q")]
-        @test isnothing(phase_correction(system, code))
+    for (satellite_system, code) in [('C', "L2Q"), ('C', "L6Q"), ('R', "L3Q")]
+        @test isnothing(phase_correction(satellite_system, code))
     end
     @test phase_correction('C', "L7Q") === -0.25
     # And codes the table leaves out have neither.
-    for (system, code) in [('S', "L1C"), ('G', "L1Y"), ('E', "L1A"), ('J', "L1Z")]
-        @test isnothing(RINEXParser.reference_code(system, code))
-        @test isnothing(phase_correction(system, code))
+    for (satellite_system, code) in [('S', "L1C"), ('G', "L1Y"), ('E', "L1A"), ('J', "L1Z")]
+        @test isnothing(RINEXParser.reference_code(satellite_system, code))
+        @test isnothing(phase_correction(satellite_system, code))
     end
     @test_throws ArgumentError RINEXParser.reference_code('G', "C1C")
     @test_throws ArgumentError RINEXParser.reference_code('C', "L1I")
@@ -492,10 +494,13 @@ end
 
     # Every entry is a carrier phase of Tables 14-20, in one group only,
     # and each group leads with its reference.
-    for (system, groups) in RINEXParser.PHASE_ALIGNMENT_GROUPS
+    for (satellite_system, groups) in RINEXParser.PHASE_ALIGNMENT_GROUPS
         codes = [first(entry) for group in groups for entry in group]
         @test allunique(codes)
-        @test all(code -> RINEXParser.check_carrier_phase_code(system, code) == code, codes)
+        @test all(
+            code -> RINEXParser.check_carrier_phase_code(satellite_system, code) == code,
+            codes,
+        )
         @test all(group -> last(first(group)) === 0.0, groups)
     end
 end
@@ -697,8 +702,8 @@ end
 end
 
 @testset "observation codes follow RINEX 3.05 Tables 14-20" begin
-    function accepts(system, codes...)
-        obs_codes = [system => collect(codes)]
+    function accepts(satellite_system, codes...)
+        obs_codes = [satellite_system => collect(codes)]
         header = RinexObsHeader(
             obs_codes = obs_codes,
             phase_shifts = aligned_phase_shifts(obs_codes),
@@ -707,9 +712,9 @@ end
     end
     # The header states a shift for a carrier phase as `accepts` does, so a
     # rejection comes from the code and not from a missing PhaseShift.
-    rejects(system, code) =
+    rejects(satellite_system, code) =
         try
-            obs_codes = [system => [code]]
+            obs_codes = [satellite_system => [code]]
             RinexObsWriter(
                 IOBuffer(),
                 RinexObsHeader(

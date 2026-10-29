@@ -17,8 +17,8 @@ end
 # test that is not about alignment arrived aligned, which holds for any code
 # without asking Table A23 which ones a header has to state.
 aligned_phase_shifts(obs_codes) = [
-    PhaseShift(system, code, 0.0) for (system, codes) in obs_codes for
-    code in codes if startswith(code, "L")
+    PhaseShift(satellite_system, code, 0.0) for (satellite_system, codes) in obs_codes
+    for code in codes if startswith(code, "L")
 ]
 
 body_lines(lines) = lines[(findfirst(l->label(l)=="END OF HEADER", lines)+1):end]

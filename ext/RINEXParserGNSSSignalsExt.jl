@@ -4,10 +4,10 @@ using GNSSSignals: AbstractGNSSSignal, TimeSystem, get_constellation_id, get_sig
 using GNSSSignals: GNSSSignals
 import RINEXParser:
     observation_code, satellite_system, time_system, gnss_time_system, epoch_time
-using RINEXParser: OBSERVATION_TYPES
+using RINEXParser: RINEXParser, OBSERVATION_TYPES
 
 # RINEX satellite system character per GNSSSignals constellation.
-const SYSTEM_CHARACTERS = Dict(:GPS => 'G', :Galileo => 'E', :BeiDou => 'C')
+const SATELLITE_SYSTEMS = Dict(:GPS => 'G', :Galileo => 'E', :BeiDou => 'C')
 
 # Band and attribute of the observation code of every signal GNSSSignals
 # defines, keyed by `get_signal_id`, from the code tables of the
@@ -56,12 +56,12 @@ const UNCODED_SIGNALS = Dict(
 
 function satellite_system(signal::AbstractGNSSSignal)
     constellation = get_constellation_id(signal)
-    get(SYSTEM_CHARACTERS, constellation) do
+    get(SATELLITE_SYSTEMS, constellation) do
         throw(
             ArgumentError(
                 "Constellation $constellation has no RINEX satellite system character " *
                 "here; the systems known are " *
-                join(sort!(string.(collect(keys(SYSTEM_CHARACTERS)))), ", "),
+                join(sort!(string.(collect(keys(SATELLITE_SYSTEMS)))), ", "),
             ),
         )
     end
@@ -109,16 +109,16 @@ function gnss_time_system(code::AbstractString)
     end
 end
 # Satellite systems or a header: the time system of their epochs.
-gnss_time_system(systems) = gnss_time_system(time_system(systems))
+gnss_time_system(satellite_systems) = gnss_time_system(time_system(satellite_systems))
 
-function time_system(system::TimeSystem)
+function time_system(time_system::TimeSystem)
     for (code, candidate) in TIME_SYSTEMS
-        candidate == system && return code
+        candidate == time_system && return code
     end
-    throw(ArgumentError("The time system $system has no RINEX time-system code here"))
+    throw(ArgumentError("The time system $time_system has no RINEX time-system code here"))
 end
 
-epoch_time(system::TimeSystem; week::Integer, time_of_week::Real) =
-    epoch_time(time_system(system); week, time_of_week)
+epoch_time(time_system::TimeSystem; week::Integer, time_of_week::Real) =
+    epoch_time(RINEXParser.time_system(time_system); week, time_of_week)
 
 end # module RINEXParserGNSSSignalsExt

@@ -136,7 +136,7 @@ end
         obs_header,
     )
     @test_throws ArgumentError RinexObsWriter(
-        RinexDirectory(directory; system = 'E'),
+        RinexDirectory(directory; satellite_system = 'E'),
         obs_header,
     )
     @test_throws ArgumentError RinexDirectory(directory; compression = "gz")

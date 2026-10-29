@@ -25,13 +25,13 @@
             @test occursin("OS SIS ICD Issue 2.2", sprint(showerror, error))
             continue
         end
-        system = RINEXParser.satellite_system(signal)
-        @test system in ('G', 'E', 'C')
+        satellite_system = RINEXParser.satellite_system(signal)
+        @test satellite_system in ('G', 'E', 'C')
         # Every code is one RINEX 3.05 defines for its constellation, which
         # the writer checks a header against.
         for type in ('C', 'L', 'D', 'S')
             code = observation_code(type, signal)
-            @test RINEXParser.check_observation_code(system, code) == code
+            @test RINEXParser.check_observation_code(satellite_system, code) == code
             @test first(code) == type
         end
     end
@@ -107,18 +107,18 @@ end
     # they are the ones GNSSSignals defines.
     @test RINEXParser.SECONDS_PER_WEEK == GNSSSignals.SECONDS_PER_WEEK
     for code in ("GPS", "GAL", "BDT")
-        system = gnss_time_system(code)
+        time_system = gnss_time_system(code)
         # Week 0 of a system starts at its TAI origin, labelled in its own time: the
         # TAI origin less the system's offset from TAI.
         origin = epoch_time(code; week = 0, time_of_week = 0).time
-        offset = get_tai_offset(system)
-        @test (TAITime(get_tai_system_start_time(system)) - TAITime(origin)) *
+        offset = get_tai_offset(time_system)
+        @test (TAITime(get_tai_system_start_time(time_system)) - TAITime(origin)) *
               oneunit(offset) == offset
         # And its weeks are GNSSSignals' weeks.
         week, time_of_week = 1100, 345600.25
         t = epoch_time(code; week, time_of_week)
         @test t.time - origin ==
-              DateTime(get_week_start_epoch(system, week) + time_of_week) -
-              DateTime(get_week_start_epoch(system, 0))
+              DateTime(get_week_start_epoch(time_system, week) + time_of_week) -
+              DateTime(get_week_start_epoch(time_system, 0))
     end
 end

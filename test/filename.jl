@@ -42,7 +42,7 @@
         @test name.start_time == DateTime(2012, 6, 8, 15, 30)
         @test name.period == Minute(15)
         @test name.interval == 0.2
-        @test name.system == 'M'
+        @test name.satellite_system == 'M'
         @test name.file_type == 'O'
         @test name.format == "crx"
         @test name.compression == "gz"
@@ -171,7 +171,7 @@
         # A one-letter string is accepted like the other text fields.
         @test name(data_source = "s").data_source == 'S'
         @test_throws ArgumentError name(data_source = "RS")
-        @test_throws ArgumentError name(system = 'X')
+        @test_throws ArgumentError name(satellite_system = 'X')
         @test_throws ArgumentError name(file_type = 'X')
         @test_throws ArgumentError name(format = "obs")
         @test_throws ArgumentError name(compression = "Z")
@@ -184,7 +184,7 @@
         @test_throws ArgumentError name(file_type = 'N', interval = 30.0)
         @test_throws ArgumentError name(file_type = 'N', format = "crx")
         # A meteorological file is MM.
-        @test_throws ArgumentError name(file_type = 'M', system = 'G')
+        @test_throws ArgumentError name(file_type = 'M', satellite_system = 'G')
         # The start time is the one field with no default.
         @test_throws ArgumentError RinexFileName(; station = "ABCD", start_time = nothing)
     end
@@ -196,7 +196,7 @@
             data_source = 's',
             start_time = Date(2012, 6, 8),
             period = Day(1),
-            system = 'g',
+            satellite_system = 'g',
             file_type = 'o',
             format = "CRX",
             compression = "GZ",
@@ -317,9 +317,9 @@
         # Silently dropping these is what the interval of a navigation name
         # is not allowed to do either.
         @test_throws ArgumentError rinex_filename(obs, start_time; file_type = 'N')
-        @test_throws ArgumentError rinex_filename(obs, start_time; system = 'E')
+        @test_throws ArgumentError rinex_filename(obs, start_time; satellite_system = 'E')
         @test_throws ArgumentError rinex_filename(nav, start_time; file_type = 'O')
-        @test_throws ArgumentError rinex_filename(nav, start_time; system = 'E')
+        @test_throws ArgumentError rinex_filename(nav, start_time; satellite_system = 'E')
         # The fields the header does not determine stay keywords.
         @test rinex_filename(obs, start_time; station = "ZZZZ", interval = 30.0) ==
               "ZZZZ00DEU_R_20200010000_00U_30S_GO.rnx"
