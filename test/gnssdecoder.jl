@@ -502,7 +502,7 @@ end
     @test iono.type == "GAL"
     @test iono.parameters == (4.5e1, 1.5625e-2, -3.0517578125e-3)
     corrections = header.time_system_corrections
-    @test [c.type for c in corrections] == ["GAUT", "GPGA"]
+    @test [c.type for c in corrections] == ["GAUT", "GAGP"]
     # The UTC week is broadcast in 8 bits and the GGTO week in 6 (12 is week
     # 2124 mod 64); both are written as the continuous week aligned with GPS.
     @test [c.reference_week for c in corrections] == [GPS_WEEK, GPS_WEEK]

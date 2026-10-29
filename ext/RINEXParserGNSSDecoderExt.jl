@@ -326,7 +326,8 @@ utc_correction_type(::GPSMessage) = "GPUT"
 utc_correction_type(::GalileoMessage) = "GAUT"
 utc_correction_type(::BeiDouMessage) = "BDUT"
 
-# The system's offset from UTC, and Galileo's from GPS time. RINEX 3.05 records
+# The system's offset from UTC, and Galileo's from GPS time, GAGP since RINEX
+# 3.04, which retired the GPGA label for the same value. RINEX 3.05 records
 # the linear polynomial only, so the A_2 of the CNAV-family messages, a drift
 # rate of at most 2^-53 s/s², is left out.
 function time_system_corrections(decoder, approximate_year)
@@ -355,7 +356,7 @@ function time_system_corrections(decoder, approximate_year)
     isnothing(ggto) || push!(
         corrections,
         TimeSystemCorrection(
-            "GPGA",
+            "GAGP",
             ggto.A_0G,
             ggto.A_1G,
             ggto.t_0G,
