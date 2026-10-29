@@ -10,8 +10,13 @@ module RINEXParserGNSSDecoderExt
 using GNSSDecoder:
     GNSSDecoder,
     GNSSDecoderState,
-    is_decoding_completed_for_positioning,
-    resolve_reference_week
+    get_broadcast_time_of_week,
+    get_broadcast_week,
+    get_klobuchar_parameters,
+    get_nequick_g_parameters,
+    get_signal_type,
+    is_decoding_completed_for_positioning
+using GNSSSignals: GalileoE5bI
 import RINEXParser: rinex_ephemeris, has_rinex_ephemeris, add_header_records!
 using RINEXParser:
     RINEXParser,
@@ -42,8 +47,8 @@ message_week(decoder, ::Nothing) = decoder.data.WN
 message_week(::GNSSDecoderState{<:GPSData}, ::Nothing) = throw(
     ArgumentError(
         "GPS LNAV broadcasts its week in 10 bits, so the continuous week of a GPS " *
-        "decoder has to be given, e.g. as week = PositionVelocityTime.get_week(" *
-        "decoder; approximate_year)",
+        "decoder has to be given, e.g. as week = " *
+        "get_broadcast_week(decoder; approximate_year)",
     ),
 )
 
@@ -67,7 +72,7 @@ function rinex_ephemeris(decoder::GNSSDecoderState{<:GPSData}; week = nothing)
     times = navigation_times(
         'G';
         week = message_week(decoder, week),
-        transmission_time = data.TOW,
+        transmission_time = get_broadcast_time_of_week(decoder),
         toe = data.t_0e,
         toc = data.t_0c,
     )
@@ -161,14 +166,12 @@ galileo_health(data::GNSSDecoder.GalileoE5aData) = galileo_sv_health(;
 )
 
 # E1-B and E5b both broadcast I/NAV into the same data type, so the signal a
-# record was decoded from is told apart by the decoder's constants. The
-# source keys a record's identity, so the I/NAV and F/NAV messages of one
-# satellite stay the separate records RINEX requires.
-galileo_sources(::GNSSDecoderState{<:GNSSDecoder.GalileoINAVData}) =
+# record was decoded from is told apart by the decoder's signal. The source
+# keys a record's identity, so the I/NAV and F/NAV messages of one satellite
+# stay the separate records RINEX requires.
+galileo_sources(decoder::GNSSDecoderState{<:GNSSDecoder.GalileoINAVData}) =
+    get_signal_type(decoder) <: GalileoE5bI ? galileo_data_sources(; inav_e5b = true) :
     galileo_data_sources(; inav_e1b = true)
-galileo_sources(
-    ::GNSSDecoderState{<:GNSSDecoder.GalileoINAVData,<:GNSSDecoder.GalileoE5bConstants},
-) = galileo_data_sources(; inav_e5b = true)
 galileo_sources(::GNSSDecoderState{<:GNSSDecoder.GalileoE5aData}) =
     galileo_data_sources(; fnav_e5a = true)
 
@@ -186,7 +189,7 @@ function rinex_ephemeris(decoder::GNSSDecoderState{<:GalileoData}; week = nothin
     times = navigation_times(
         'E';
         week = message_week(decoder, week),
-        transmission_time = data.TOW,
+        transmission_time = get_broadcast_time_of_week(decoder),
         toe = data.t_0e,
         toc = data.t_0c,
     )
@@ -231,7 +234,7 @@ function rinex_ephemeris(decoder::GNSSDecoderState{<:BeiDouData}; week = nothing
     times = navigation_times(
         'C';
         week = message_week(decoder, week),
-        transmission_time = data.SOW,
+        transmission_time = get_broadcast_time_of_week(decoder),
         toe = data.t_0e,
         toc = data.t_0c,
     )
@@ -279,7 +282,7 @@ function add_header_records!(
     decoder::GNSSDecoderState{<:Union{GPSData,GalileoData,BeiDouData}};
     week = nothing,
 )
-    for correction in ionospheric_corrections(decoder.data, decoder.prn)
+    for correction in ionospheric_corrections(decoder)
         replace_record!(header.ionospheric_corrections, correction, ionospheric_key)
     end
     corrections = time_system_corrections(decoder.data, () -> header_week(decoder, week))
@@ -304,37 +307,37 @@ end
 # satellite they were transmitted.
 ionospheric_key(correction) = (correction.type, correction.time_mark, correction.sv_id)
 
-# Klobuchar (GPS, BDS) and NeQuick (Galileo) coefficients the satellite has
-# broadcast.
-function klobuchar_corrections(data, alpha, beta; kwargs...)
-    corrections = IonosphericCorrection[]
-    isnothing(data.α_0) || push!(
-        corrections,
-        IonosphericCorrection(alpha, (data.α_0, data.α_1, data.α_2, data.α_3); kwargs...),
-    )
-    isnothing(data.β_0) || push!(
-        corrections,
-        IonosphericCorrection(beta, (data.β_0, data.β_1, data.β_2, data.β_3); kwargs...),
-    )
-    corrections
+# Klobuchar (GPS, BDS) and NeQuick-G (Galileo) coefficients the satellite has
+# broadcast, as GNSSDecoder reads them: a whole set or none.
+function klobuchar_corrections(decoder, alpha, beta; kwargs...)
+    parameters = get_klobuchar_parameters(decoder)
+    isnothing(parameters) && return IonosphericCorrection[]
+    (; α_0, α_1, α_2, α_3, β_0, β_1, β_2, β_3) = parameters
+    [
+        IonosphericCorrection(alpha, (α_0, α_1, α_2, α_3); kwargs...),
+        IonosphericCorrection(beta, (β_0, β_1, β_2, β_3); kwargs...),
+    ]
 end
-ionospheric_corrections(data::GPSData, prn) = klobuchar_corrections(data, "GPSA", "GPSB")
-function ionospheric_corrections(data::BeiDouData, prn)
+ionospheric_corrections(decoder::GNSSDecoderState{<:GPSData}) =
+    klobuchar_corrections(decoder, "GPSA", "GPSB")
+function ionospheric_corrections(decoder::GNSSDecoderState{<:BeiDouData})
     # RINEX 3.05 Table A5 makes the time mark and the satellite mandatory for
     # BDS. Both describe the transmission, so a message that has not reported
     # its second of week yet cannot carry them.
-    isnothing(data.SOW) && return IonosphericCorrection[]
+    time_of_week = get_broadcast_time_of_week(decoder)
+    isnothing(time_of_week) && return IonosphericCorrection[]
     klobuchar_corrections(
-        data,
+        decoder,
         "BDSA",
         "BDSB";
-        time_mark = ionosphere_time_mark(data.SOW),
-        sv_id = prn,
+        time_mark = ionosphere_time_mark(time_of_week),
+        sv_id = decoder.prn,
     )
 end
-function ionospheric_corrections(data::GalileoData, prn)
-    isnothing(data.a_i0) && return IonosphericCorrection[]
-    [IonosphericCorrection("GAL", (data.a_i0, data.a_i1, data.a_i2))]
+function ionospheric_corrections(decoder::GNSSDecoderState{<:GalileoData})
+    parameters = get_nequick_g_parameters(decoder)
+    isnothing(parameters) && return IonosphericCorrection[]
+    [IonosphericCorrection("GAL", (parameters.a_i0, parameters.a_i1, parameters.a_i2))]
 end
 
 # Broadcast reference weeks arrive truncated - the UTC and leap-second weeks
@@ -344,6 +347,14 @@ end
 # record that needs it, as a GPS decoder cannot give one without help.
 const UTC_WN_MODULUS = 256
 const GGTO_WN_MODULUS = 64
+
+# The continuous week whose last `modulus` weeks read `truncated`, nearest
+# `week`. GNSSDecoder resolves the reference weeks it evaluates the same way,
+# in its resolve_reference_week, which it does not make public.
+function resolve_reference_week(truncated, week, modulus)
+    half = modulus ÷ 2
+    week - (mod(week - Int(truncated) + half, modulus) - half)
+end
 
 function time_system_correction(type, a0, a1, t_0, WN_0, week, modulus)
     any(isnothing, (a0, a1, t_0, WN_0)) && return nothing

@@ -12,14 +12,14 @@ GNSSDecoder = "bf6b1ec8-12ad-4501-972c-3dec0d675c2b"
 GNSSSignals = "52c80523-2a4e-5c38-8979-05588f836870"
 
 [extensions]
-RINEXParserGNSSDecoderExt = "GNSSDecoder"
+RINEXParserGNSSDecoderExt = ["GNSSDecoder", "GNSSSignals"]
 RINEXParserGNSSSignalsExt = "GNSSSignals"
 
 [compat]
 Aqua = "0.8"
 Dates = "1"
-GNSSDecoder = "5"
-GNSSSignals = "4"
+GNSSDecoder = "6"
+GNSSSignals = "5"
 InteractiveUtils = "1"
 Printf = "1"
 Test = "1"

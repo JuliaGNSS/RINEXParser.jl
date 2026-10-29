@@ -142,7 +142,7 @@ decoder_with(system, prn, data) = GNSSDecoder.GNSSDecoderState(
     GNSSDecoderState(system, prn);
     data,
     raw_data = data,
-    num_bits_after_valid_syncro_sequence = 0,
+    num_bits_since_sync = 0,
 )
 
 @testset "GPS LNAV ephemeris record" begin
@@ -258,7 +258,7 @@ end
     @test eph.prn == 24
     # Galileo's 12-bit week counts from GPS week 1024, so the record's week is
     # GPS-aligned; the decoded week is the default, and a given one is on
-    # Galileo's own count, as PositionVelocityTime gives it.
+    # Galileo's own count, as GNSSDecoder's `get_broadcast_week` gives it.
     @test eph.week == GPS_WEEK
     @test rinex_ephemeris(decoder; week = GPS_WEEK - 1024) == eph
     @test eph.toc == GPS_TOC

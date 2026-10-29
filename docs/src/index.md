@@ -54,7 +54,7 @@ units and time conventions for each constellation.
 
 External record types can implement the [Ephemeris interface](@ref).
 
-With GNSSDecoder loaded, [`rinex_ephemeris`](@ref) converts a decoded
+With GNSSDecoder and GNSSSignals loaded, [`rinex_ephemeris`](@ref) converts a decoded
 navigation message into its record, [`has_rinex_ephemeris`](@ref) says
 whether RINEX 3.05 has one for it, and [`add_header_records!`](@ref) collects
 the header records it carries; with GNSSSignals loaded,

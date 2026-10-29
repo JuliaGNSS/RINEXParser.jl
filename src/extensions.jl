@@ -7,7 +7,7 @@
         -> Union{Nothing,GPSEphemeris,GalileoEphemeris,BeiDouEphemeris}
 
 The navigation record of a GNSSDecoder `GNSSDecoderState`, for
-[`write_ephemeris!`](@ref). Available with `using GNSSDecoder`.
+[`write_ephemeris!`](@ref). Available with `using GNSSDecoder, GNSSSignals`.
 
 Records exist for GPS LNAV (L1 C/A), Galileo I/NAV (E1-B, E5b) and F/NAV
 (E5a), and BDS D1/D2 (B1I, B3I). The GPS CNAV and CNAV-2 (L5, L2C, L1C),
@@ -17,9 +17,10 @@ does a message not yet complete for positioning; [`has_rinex_ephemeris`](@ref)
 tells the two apart.
 
 `week` is the continuous week on the constellation's own count (the GPS,
-GST or BDT week), as `PositionVelocityTime.get_week` returns it. It defaults
-to the decoded one for Galileo and BDS; GPS LNAV broadcasts only 10 bits of
-it, so a GPS decoder needs it given.
+GST or BDT week), as GNSSDecoder's
+`get_broadcast_week(decoder; approximate_year)` returns it. It defaults to
+the decoded one for Galileo and BDS; GPS LNAV broadcasts only 10 bits of it,
+so a GPS decoder needs it given.
 
 The decoded values are converted to the record's units and conventions:
 issue-of-data and health words, accuracy indices to meters, the fit-interval
@@ -34,9 +35,9 @@ function rinex_ephemeris end
 
 Whether RINEX 3.05 has a navigation record for the message a GNSSDecoder
 `GNSSDecoderState` decodes, however much of it is decoded yet. Available with
-`using GNSSDecoder`. A message this is `true` for gets its record from
-[`rinex_ephemeris`](@ref) once it is complete; one it is `false` for never
-does.
+`using GNSSDecoder, GNSSSignals`. A message this is `true` for gets its
+record from [`rinex_ephemeris`](@ref) once it is complete; one it is `false`
+for never does.
 """
 function has_rinex_ephemeris end
 
@@ -47,7 +48,7 @@ Add the navigation-header records a GNSSDecoder `GNSSDecoderState` has
 decoded to `header`: the ionospheric corrections (Klobuchar for GPS and
 BDS, NeQuick for Galileo), the time-system corrections (each
 constellation's offset to UTC, and Galileo's to GPS time) and the leap
-seconds. Available with `using GNSSDecoder`.
+seconds. Available with `using GNSSDecoder, GNSSSignals`.
 
 These are broadcast far less often than the ephemerides - GPS sends them
 once every 12.5 minutes - so a writer collects them from every decoder
