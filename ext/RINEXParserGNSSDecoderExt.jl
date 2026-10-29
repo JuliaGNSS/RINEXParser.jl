@@ -14,6 +14,7 @@ using GNSSDecoder:
     get_broadcast_week,
     get_klobuchar_parameters,
     get_nequick_g_parameters,
+    get_range_accuracy,
     get_signal_type,
     is_decoding_completed_for_positioning
 using GNSSSignals: GalileoE5bI
@@ -100,7 +101,7 @@ function rinex_ephemeris(decoder::GNSSDecoderState{<:GPSData}; approximate_year:
         codes_on_l2 = something(data.code_on_L2, 0),
         week = times.week,
         l2p_data_flag = something(data.L2_P_data_flag, false) ? 1 : 0,
-        sv_accuracy = ura_metres(data.URA_index),
+        sv_accuracy = accuracy_metres(decoder, USE_AT_OWN_RISK),
         sv_health = data.sv_health,
         tgd = data.T_GD,
         iodc = data.IODC,
@@ -112,35 +113,17 @@ function rinex_ephemeris(decoder::GNSSDecoderState{<:GPSData}; approximate_year:
     )
 end
 
-# The metres of a GPS URA or BDS URAI index, two geometric segments
-# (IS-GPS-200N Table 20-I), and `beyond` for the top index or none.
-function range_accuracy_metres(index, beyond)
-    isnothing(index) && return beyond
-    index <= 6 && return 2.0^(1 + index / 2)
-    index <= 14 && return 2.0^(index - 2)
-    beyond
+# The broadcast range accuracy in metres, GNSSDecoder's nominal value of the
+# index, with GPS's roundings to 2.8, 5.7 and 11.3 m, which RINEX asks for too.
+# Where the satellite predicts none, GNSSDecoder reports `Inf` and RINEX a
+# value of its own: for GPS and BDS 8192 m, "use at own risk", the 2^(N-2) of
+# index 15 (Tables A6 and A14); for Galileo -1, "NAPA / unknown" (Table A8).
+const USE_AT_OWN_RISK = 8192.0
+const NO_ACCURACY_PREDICTION = -1.0
+function accuracy_metres(decoder, no_prediction)
+    accuracy = get_range_accuracy(decoder)
+    isnothing(accuracy) || isinf(accuracy) ? no_prediction : accuracy
 end
-
-# GPS user range accuracy. Index 15 is "no accuracy prediction available",
-# which RINEX reports as a negative accuracy, as `sisa_metres` does Galileo's.
-ura_metres(index) = range_accuracy_metres(index, -1.0)
-
-# BDS user range accuracy (RINEX 3.05 Table A14). Index 15 is "use at own
-# risk", which RINEX reports as 8192 m.
-bds_accuracy_metres(index) = range_accuracy_metres(index, 8192.0)
-
-# Galileo signal-in-space accuracy: the broadcast SISA index maps onto metres
-# in four linear segments (Galileo OS SIS ICD Table 92). Index 255 means "no
-# accuracy prediction available" (NAPA), and the spare range above 125 is
-# equally meaningless; RINEX reports both as a negative accuracy.
-function sisa_metres(index::Integer)
-    index <= 49 && return 0.01 * index
-    index <= 74 && return 0.5 + 0.02 * (index - 50)
-    index <= 99 && return 1.0 + 0.04 * (index - 75)
-    index <= 125 && return 2.0 + 0.16 * (index - 100)
-    -1.0
-end
-sisa_metres(::Nothing) = -1.0
 
 # The broadcast health and data-validity fields as the plain integers the
 # RINEX bit fields are packed from. A signal whose status a message does not
@@ -178,9 +161,6 @@ galileo_sources(::GNSSDecoderState{<:GNSSDecoder.GalileoE5aData}) =
 galileo_bgd_e5b_e1(data::GNSSDecoder.GalileoINAVData) = data.BGD_E1_E5b
 galileo_bgd_e5b_e1(::GNSSDecoder.GalileoE5aData) = 0.0
 
-galileo_sisa(data::GNSSDecoder.GalileoINAVData) = sisa_metres(data.SISA_E1_E5b)
-galileo_sisa(data::GNSSDecoder.GalileoE5aData) = sisa_metres(data.SISA_E1_E5a)
-
 function rinex_ephemeris(
     decoder::GNSSDecoderState{<:GalileoData};
     approximate_year::Integer,
@@ -214,7 +194,9 @@ function rinex_ephemeris(
         idot = data.i_dot,
         data_sources = galileo_sources(decoder),
         week = times.week,
-        sisa = galileo_sisa(data),
+        # The SISA of the band pair the message states its clock for: E1-E5b
+        # on I/NAV, E1-E5a on F/NAV.
+        sisa = accuracy_metres(decoder, NO_ACCURACY_PREDICTION),
         sv_health = galileo_health(data),
         bgd_e5a_e1 = data.BGD_E1_E5a,
         bgd_e5b_e1 = galileo_bgd_e5b_e1(data),
@@ -253,7 +235,7 @@ function rinex_ephemeris(decoder::GNSSDecoderState{<:BeiDouData}; approximate_ye
         omegadot = data.Ω_dot,
         idot = data.i_dot,
         week = times.week,
-        sv_accuracy = bds_accuracy_metres(data.URAI),
+        sv_accuracy = accuracy_metres(decoder, USE_AT_OWN_RISK),
         sath1 = data.SatH1,
         tgd1_b1_b3 = data.T_GD1,
         tgd2_b2_b3 = data.T_GD2,

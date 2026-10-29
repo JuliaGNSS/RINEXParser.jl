@@ -199,16 +199,20 @@ decoder_with(system, prn, data) = GNSSDecoder.GNSSDecoderState(
     # encodes.
     unhealthy = decoder_with(GPSL1CA(), 13, gps_lnav_data(; sv_health = 0b111111))
     @test rinex_ephemeris(unhealthy; approximate_year = YEAR).sv_health == 63
-    # User range accuracy across both segments of IS-GPS-200 Table 20-I, and
-    # the index that means no prediction is available.
+    # User range accuracy across both segments of IS-GPS-200 Table 20-I, the
+    # nominal values of the odd indices below 6 rounded as RINEX 3.05 Table A6
+    # asks, and the index without a prediction, which the table writes as
+    # 8192 m, "use at own risk".
     accuracy(index) = rinex_ephemeris(
         decoder_with(GPSL1CA(), 13, gps_lnav_data(; URA_index = index));
         approximate_year = YEAR,
     ).sv_accuracy
+    @test accuracy(1) == 2.8
+    @test accuracy(5) == 11.3
     @test accuracy(6) == 16.0
     @test accuracy(7) == 32.0
     @test accuracy(14) == 4096.0
-    @test accuracy(15) == -1.0
+    @test accuracy(15) == 8192.0
 
     # The record is written as it comes.
     lines = written_lines(RinexNavWriter, RinexNavHeader()) do writer
@@ -342,9 +346,9 @@ end
     @test eph.tgd2_b2_b3 ≈ -1.17e-8
     @test (eph.aode, eph.aodc) == (1, 1)
     @test eph.sath1 == 0
-    # URAI 0 is 2.0 m by the same two segments as GPS, but the top of the BDS
-    # range means "use at own risk" and is 8192 m, not the negative accuracy
-    # GPS and Galileo report for an accuracy that was never predicted.
+    # URAI 0 is 2.0 m by the same two segments as GPS, and the top of the
+    # range, no prediction, is 8192 m, "use at own risk", as for GPS (RINEX
+    # 3.05 Table A14), not the -1 of Galileo's NAPA.
     @test eph.sv_accuracy == 2.0
     accuracy(index) = rinex_ephemeris(
         decoder_with(BeiDouB1I(), 21, beidou_dnav_data(; URAI = index));
