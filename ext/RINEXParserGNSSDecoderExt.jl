@@ -12,10 +12,13 @@ using GNSSDecoder:
     GNSSDecoderState,
     get_broadcast_time_of_week,
     get_broadcast_week,
+    get_ggto_parameters,
     get_klobuchar_parameters,
+    get_leap_second_parameters,
     get_nequick_g_parameters,
     get_range_accuracy,
     get_signal_type,
+    get_utc_parameters,
     is_decoding_completed_for_positioning
 using GNSSSignals: GalileoE5bI
 import RINEXParser: rinex_ephemeris, has_rinex_ephemeris, add_header_records!
@@ -33,21 +36,18 @@ using RINEXParser:
     ionosphere_time_mark,
     navigation_times
 
+# The messages of each constellation, and those of them RINEX 3.05 has an
+# ephemeris record for.
+const GPSMessage = GNSSDecoder.AbstractGPSData
+const GalileoMessage = GNSSDecoder.AbstractGalileoData
+const BeiDouMessage = GNSSDecoder.AbstractBeiDouData
 const GPSData = GNSSDecoder.GPSL1CAData
 const GalileoData = Union{GNSSDecoder.GalileoINAVData,GNSSDecoder.GalileoE5aData}
 const BeiDouData = GNSSDecoder.BeiDouDNAVData
 
-satellite_system(::GPSData) = 'G'
-satellite_system(::GalileoData) = 'E'
-satellite_system(::BeiDouData) = 'C'
-
-# The continuous week a header record of the message counts: aligned with
-# the GPS week for Galileo. `nothing` before the week was decoded.
-function header_week(decoder, approximate_year)
-    week = get_broadcast_week(decoder; approximate_year)
-    isnothing(week) && return nothing
-    first(RINEXParser.record_week(satellite_system(decoder.data), week))
-end
+satellite_system(::GPSMessage) = 'G'
+satellite_system(::GalileoMessage) = 'E'
+satellite_system(::BeiDouMessage) = 'C'
 
 # Messages RINEX 3.05 has a record for, and every other one.
 has_rinex_ephemeris(::GNSSDecoderState) = false
@@ -247,23 +247,24 @@ end
 # ─────────────────────────────────────────────────────────────────────────
 # Navigation-file header
 
-# Messages that carry no header records, and the ones that do.
+# Every GPS, Galileo and BDS message carries header records, whether RINEX
+# 3.05 has a record for its ephemeris or not: the records are the same
+# whichever message broadcast them.
 add_header_records!(header::RinexNavHeader, ::GNSSDecoderState; approximate_year::Integer) =
     header
 
 function add_header_records!(
     header::RinexNavHeader,
-    decoder::GNSSDecoderState{<:Union{GPSData,GalileoData,BeiDouData}};
+    decoder::GNSSDecoderState{<:Union{GPSMessage,GalileoMessage,BeiDouMessage}};
     approximate_year::Integer,
 )
     for correction in ionospheric_corrections(decoder)
         replace_record!(header.ionospheric_corrections, correction, ionospheric_key)
     end
-    week = header_week(decoder, approximate_year)
-    for correction in time_system_corrections(decoder.data, week)
+    for correction in time_system_corrections(decoder, approximate_year)
         replace_record!(header.time_system_corrections, correction, c -> c.type)
     end
-    leap_seconds = broadcast_leap_seconds(decoder.data, week)
+    leap_seconds = broadcast_leap_seconds(decoder, approximate_year)
     preferred_leap_seconds(header.leap_seconds, leap_seconds) &&
         (header.leap_seconds = leap_seconds)
     header
@@ -281,8 +282,9 @@ end
 # satellite they were transmitted.
 ionospheric_key(correction) = (correction.type, correction.time_mark, correction.sv_id)
 
-# Klobuchar (GPS, BDS) and NeQuick-G (Galileo) coefficients the satellite has
-# broadcast, as GNSSDecoder reads them: a whole set or none.
+# Klobuchar (GPS, BDS D1/D2) and NeQuick-G (Galileo) coefficients the satellite
+# has broadcast, as GNSSDecoder reads them: a whole set or none. RINEX 3.05 has
+# no record for the BDGIM coefficients of the BDS B-CNAV messages.
 function klobuchar_corrections(decoder, alpha, beta; kwargs...)
     parameters = get_klobuchar_parameters(decoder)
     isnothing(parameters) && return IonosphericCorrection[]
@@ -292,9 +294,9 @@ function klobuchar_corrections(decoder, alpha, beta; kwargs...)
         IonosphericCorrection(beta, (β_0, β_1, β_2, β_3); kwargs...),
     ]
 end
-ionospheric_corrections(decoder::GNSSDecoderState{<:GPSData}) =
+ionospheric_corrections(decoder::GNSSDecoderState{<:GPSMessage}) =
     klobuchar_corrections(decoder, "GPSA", "GPSB")
-function ionospheric_corrections(decoder::GNSSDecoderState{<:BeiDouData})
+function ionospheric_corrections(decoder::GNSSDecoderState{<:BeiDouMessage})
     # RINEX 3.05 Table A5 makes the time mark and the satellite mandatory for
     # BDS. Both describe the transmission, so a message that has not reported
     # its second of week yet cannot carry them.
@@ -308,92 +310,74 @@ function ionospheric_corrections(decoder::GNSSDecoderState{<:BeiDouData})
         sv_id = decoder.prn,
     )
 end
-function ionospheric_corrections(decoder::GNSSDecoderState{<:GalileoData})
+function ionospheric_corrections(decoder::GNSSDecoderState{<:GalileoMessage})
     parameters = get_nequick_g_parameters(decoder)
     isnothing(parameters) && return IonosphericCorrection[]
     [IonosphericCorrection("GAL", (parameters.a_i0, parameters.a_i1, parameters.a_i2))]
 end
 
-# Broadcast reference weeks arrive truncated - the UTC and leap-second weeks
-# to 8 bits, Galileo's GGTO week to 6 - while a header record wants the
-# continuous week. Each is lifted to the representative nearest the
-# message's own continuous week, `week`, `nothing` before one was decoded.
-const UTC_WN_MODULUS = 256
-const GGTO_WN_MODULUS = 64
+# GNSSDecoder resolves every truncated reference week onto the continuous week
+# of the message's own count; a header record counts Galileo's aligned with the
+# GPS week.
+header_week(decoder, week) =
+    first(RINEXParser.record_week(satellite_system(decoder.data), week))
 
-# The continuous week whose last `modulus` weeks read `truncated`, nearest
-# `week`. GNSSDecoder resolves the reference weeks it evaluates the same way,
-# in its resolve_reference_week, which it does not make public.
-function resolve_reference_week(truncated, week, modulus)
-    half = modulus ÷ 2
-    week - (mod(week - Int(truncated) + half, modulus) - half)
-end
+utc_correction_type(::GPSMessage) = "GPUT"
+utc_correction_type(::GalileoMessage) = "GAUT"
+utc_correction_type(::BeiDouMessage) = "BDUT"
 
-function time_system_correction(type, a0, a1, t_0, WN_0, week, modulus)
-    (any(isnothing, (a0, a1, t_0, WN_0)) || isnothing(week)) && return nothing
-    TimeSystemCorrection(type, a0, a1, t_0, resolve_reference_week(WN_0, week, modulus))
-end
-
-time_system_corrections(data::GPSData, week) = filter(
-    !isnothing,
-    [
-        time_system_correction(
-            "GPUT",
-            data.A_0UTC,
-            data.A_1UTC,
-            data.t_0t,
-            data.WN_0t,
-            week,
-            UTC_WN_MODULUS,
-        ),
-    ],
-)
-time_system_corrections(data::GalileoData, week) = filter(
-    !isnothing,
-    [
-        time_system_correction(
-            "GAUT",
-            data.A_0UTC,
-            data.A_1UTC,
-            data.t_0t,
-            data.WN_0t,
-            week,
-            UTC_WN_MODULUS,
-        ),
-        time_system_correction(
+# The system's offset from UTC, and Galileo's from GPS time. RINEX 3.05 records
+# the linear polynomial only, so the A_2 of the CNAV-family messages, a drift
+# rate of at most 2^-53 s/s², is left out.
+function time_system_corrections(decoder, approximate_year)
+    corrections = TimeSystemCorrection[]
+    utc = get_utc_parameters(decoder; approximate_year)
+    if !isnothing(utc)
+        # BDS D1/D2 broadcasts no reference epoch for its UTC offset, so the
+        # record's reference time is zero of the current BDT week.
+        reference_time, reference_week = if isnothing(utc.WN_0t)
+            0, something(get_broadcast_week(decoder; approximate_year))
+        else
+            something(utc.t_0t), utc.WN_0t
+        end
+        push!(
+            corrections,
+            TimeSystemCorrection(
+                utc_correction_type(decoder.data),
+                utc.A_0,
+                utc.A_1,
+                reference_time,
+                header_week(decoder, reference_week),
+            ),
+        )
+    end
+    ggto = get_ggto_parameters(decoder)
+    isnothing(ggto) || push!(
+        corrections,
+        TimeSystemCorrection(
             "GPGA",
-            data.A_0G,
-            data.A_1G,
-            data.t_0G,
-            data.WN_0G,
-            week,
-            GGTO_WN_MODULUS,
+            ggto.A_0G,
+            ggto.A_1G,
+            ggto.t_0G,
+            header_week(decoder, ggto.WN_0G),
         ),
-    ],
-)
-function time_system_corrections(data::BeiDouData, week)
-    (isnothing(data.A_0UTC) || isnothing(week)) && return TimeSystemCorrection[]
-    # D1/D2 broadcasts no reference epoch for its UTC offset, so the record's
-    # reference time is zero of the current BDT week.
-    [TimeSystemCorrection("BDUT", data.A_0UTC, data.A_1UTC, 0, week)]
+    )
+    corrections
 end
 
-# The broadcast leap seconds, as the full record RINEX prefers (current
-# count, count after the next event, and the week and day it falls on) where
-# the satellite sent all of it. GPS and Galileo count them alike, as a blank
-# time system is read. BDS counts BDT - UTC, 14 s fewer, and its week and day
-# from the BDT epoch, so its record names `"BDT"`.
-function broadcast_leap_seconds(data, week)
-    isnothing(data.Δt_LS) && return nothing
-    time_system = data isa BeiDouData ? "BDT" : ""
-    (any(isnothing, (data.Δt_LSF, data.WN_LSF, data.DN)) || isnothing(week)) &&
-        return LeapSeconds(Int(data.Δt_LS); time_system)
+# The broadcast leap seconds: the current count, the count after the next
+# event, and the week and day it falls on. GPS and Galileo count them alike,
+# as a blank time system is read. BDS counts BDT - UTC, 14 s fewer, and its
+# week and day from the BDT epoch, so its record names `"BDT"`.
+function broadcast_leap_seconds(decoder, approximate_year)
+    parameters = get_leap_second_parameters(decoder; approximate_year)
+    isnothing(parameters) && return nothing
     LeapSeconds(
-        Int(data.Δt_LS);
-        future_count = Int(data.Δt_LSF),
-        week = resolve_reference_week(data.WN_LSF, week, UTC_WN_MODULUS),
-        day = Int(data.DN),
-        time_system,
+        parameters.Δt_LS;
+        future_count = parameters.Δt_LSF,
+        week = header_week(decoder, parameters.WN_LSF),
+        day = parameters.DN,
+        time_system = decoder.data isa BeiDouMessage ? "BDT" : "",
     )
 end
 

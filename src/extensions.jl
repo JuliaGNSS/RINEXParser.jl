@@ -47,10 +47,16 @@ function has_rinex_ephemeris end
     add_header_records!(header::RinexNavHeader, decoder; approximate_year) -> header
 
 Add the navigation-header records a GNSSDecoder `GNSSDecoderState` has
-decoded to `header`: the ionospheric corrections (Klobuchar for GPS and
-BDS, NeQuick for Galileo), the time-system corrections (each
+decoded to `header`: the ionospheric corrections (Klobuchar for GPS and BDS
+D1/D2, NeQuick-G for Galileo), the time-system corrections (each
 constellation's offset to UTC, and Galileo's to GPS time) and the leap
 seconds. Available with `using GNSSDecoder, GNSSSignals`.
+
+Every GPS, Galileo and BDS message gives the records it broadcasts, also one
+RINEX 3.05 has no ephemeris record for: GPS CNAV and CNAV-2 the Klobuchar
+coefficients, the UTC offset and the leap seconds, and the BDS B-CNAV
+messages the UTC offset and the leap seconds. Their BDGIM coefficients and
+the drift rate `A_2` of their UTC offsets have no RINEX 3.05 field.
 
 These are broadcast far less often than the ephemerides - GPS sends them
 once every 12.5 minutes - so a writer collects them from every decoder
@@ -66,12 +72,11 @@ leap seconds, the record counted in GPS time is kept over BDS's, which
 counts BDT, and a record announcing the next leap-second event over one that
 does not, as some parsers require it.
 
-`approximate_year` is the one [`rinex_ephemeris`](@ref) takes. The reference
-weeks that are broadcast truncated - the 8-bit UTC and leap-second weeks,
-Galileo's 6-bit GGTO week - are resolved against the decoder's week into the
-continuous week a header record carries, aligned with the GPS week for
-Galileo; until the decoder has a week, the records that need one are left
-out.
+`approximate_year` is the one [`rinex_ephemeris`](@ref) takes. GNSSDecoder
+resolves the reference weeks that are broadcast truncated against the
+decoder's week, into the continuous week a header record carries, aligned
+with the GPS week for Galileo. Until the decoder has a week, the
+time-system corrections and the leap seconds are left out.
 """
 function add_header_records! end
 

@@ -451,7 +451,7 @@ gps_page_18(; kwargs...) = gps_lnav_data(;
     @test isempty(empty.time_system_corrections)
     @test isnothing(empty.leap_seconds)
     # Without the decoder's week the truncated weeks cannot be resolved: the
-    # UTC record is left out, and the leap seconds are the count alone.
+    # UTC and leap-second records wait for it.
     weekless = add_header_records!(
         RinexNavHeader(),
         decoder_with(GPSL1CA(), 13, gps_page_18(; WN = nothing));
@@ -459,7 +459,7 @@ gps_page_18(; kwargs...) = gps_lnav_data(;
     )
     @test length(weekless.ionospheric_corrections) == 2
     @test isempty(weekless.time_system_corrections)
-    @test isnothing(weekless.leap_seconds.week)
+    @test isnothing(weekless.leap_seconds)
     @test_throws UndefKeywordError add_header_records!(RinexNavHeader(), gps)
     # A message without header records leaves the header as it was.
     @test add_header_records!(
@@ -511,7 +511,7 @@ end
 end
 
 @testset "navigation-header records of BeiDou" begin
-    data = beidou_dnav_data(;
+    broadcast = (;
         α_0 = 1.0244548321e-8,
         α_1 = 2.2351741791e-8,
         α_2 = -5.9604644775e-8,
@@ -523,7 +523,11 @@ end
         A_0UTC = -9.3132257462e-10,
         A_1UTC = -7.1054273576e-15,
         Δt_LS = 4,
+        Δt_LSF = 4,
+        WN_LSF = mod(BDT_WEEK + 3, 256),
+        DN = 2,
     )
+    data = beidou_dnav_data(; broadcast...)
     header = add_header_records!(
         RinexNavHeader(),
         decoder_with(BeiDouB1I(), 21, data);
@@ -551,21 +555,15 @@ end
     # a blank identifier is read as, and its week and day count from the BDT
     # epoch. Naming the time system is what makes those numbers mean what
     # they say.
-    @test header.leap_seconds.count == 4
-    @test header.leap_seconds.time_system == "BDT"
-    @test isnothing(header.leap_seconds.future_count)
+    leap = header.leap_seconds
+    @test (leap.count, leap.future_count, leap.day) == (4, 4, 2)
+    @test leap.time_system == "BDT"
     # The event's week is broadcast in 8 bits, and written as the continuous
     # BDT week.
-    event =
-        beidou_dnav_data(; Δt_LS = 4, Δt_LSF = 5, WN_LSF = mod(BDT_WEEK + 3, 256), DN = 2)
-    @test add_header_records!(
-        RinexNavHeader(),
-        decoder_with(BeiDouB1I(), 21, event);
-        approximate_year = YEAR,
-    ).leap_seconds.week == BDT_WEEK + 3
+    @test leap.week == BDT_WEEK + 3
     # Without a second of week there is no mark to give, so no record is
     # claimed.
-    unmarked = beidou_dnav_data(; SOW = nothing, α_0 = 1.0e-8)
+    unmarked = beidou_dnav_data(; broadcast..., SOW = nothing)
     @test isempty(
         add_header_records!(
             RinexNavHeader(),
@@ -577,19 +575,86 @@ end
 
 @testset "the leap seconds of a mixed file count GPS time" begin
     gps = decoder_with(GPSL1CA(), 13, gps_page_18())
-    bds = decoder_with(BeiDouB1I(), 21, beidou_dnav_data(; Δt_LS = 4))
+    bds = decoder_with(
+        BeiDouB1I(),
+        21,
+        beidou_dnav_data(; Δt_LS = 4, Δt_LSF = 4, WN_LSF = mod(BDT_WEEK + 3, 256), DN = 2),
+    )
     for decoders in ((gps, bds), (bds, gps))
         header = RinexNavHeader()
         foreach(d -> add_header_records!(header, d; approximate_year = YEAR), decoders)
         @test header.leap_seconds.count == 18
     end
-    # And a record announcing the next event over one that does not.
-    header = RinexNavHeader()
+    # And a decoded record, which announces the next event, over a count given
+    # by hand, which does not.
+    header = RinexNavHeader(; leap_seconds = LeapSeconds(18))
     add_header_records!(header, gps; approximate_year = YEAR)
-    add_header_records!(
-        header,
-        decoder_with(GPSL1CA(), 5, gps_lnav_data(; Δt_LS = 18));
-        approximate_year = YEAR,
-    )
     @test header.leap_seconds.week == 2185
+end
+
+@testset "header records of messages without an ephemeris record" begin
+    # GPS CNAV (L5, L2C) and the BDS B-CNAV messages have no RINEX 3.05
+    # ephemeris record, but broadcast the same header records as LNAV and
+    # D1/D2: the reference weeks in 13 bits, and a UTC drift rate the header
+    # record has no field for.
+    utc_and_leap = (;
+        A_0UTC = -9.3132257462e-10,
+        A_1UTC = -7.1054273576e-15,
+        A_2UTC = 0.0,
+        t_0t = 518400,
+        Δt_LS = 18,
+        Δt_LSF = 18,
+        DN = 7,
+    )
+    l5 = decoder_with(
+        GPSL5I(),
+        3,
+        GNSSDecoder.GPSCNAVData(;
+            WN = GPS_WEEK,
+            TOW = GPS_TOW,
+            α_0 = 1.0244548321e-8,
+            α_1 = 2.2351741791e-8,
+            α_2 = -5.9604644775e-8,
+            α_3 = -1.1920928955e-7,
+            β_0 = 8.8064e4,
+            β_1 = 4.9152e4,
+            β_2 = -6.5536e4,
+            β_3 = -1.9661e5,
+            WN_0t = GPS_WEEK,
+            WN_LSF = 2185,
+            utc_and_leap...,
+        ),
+    )
+    @test !has_rinex_ephemeris(l5)
+    header = add_header_records!(RinexNavHeader(), l5; approximate_year = YEAR)
+    @test [c.type for c in header.ionospheric_corrections] == ["GPSA", "GPSB"]
+    utc = only(header.time_system_corrections)
+    @test (utc.type, utc.a0, utc.reference_time, utc.reference_week) ==
+          ("GPUT", -9.3132257462e-10, 518400, GPS_WEEK)
+    leap = header.leap_seconds
+    @test (leap.count, leap.week, leap.day, leap.time_system) == (18, 2185, 7, "")
+
+    # B1C: BDT's UTC offset with the reference epoch D1/D2 does not broadcast,
+    # and BDT leap seconds. Its ionosphere is BDGIM, which RINEX 3.05 has no
+    # record for.
+    b1c = decoder_with(
+        BeiDouB1C_D(),
+        21,
+        GNSSDecoder.BeiDouB1CData(;
+            WN = BDT_WEEK,
+            utc_and_leap...,
+            WN_0t = BDT_WEEK,
+            Δt_LS = 4,
+            Δt_LSF = 4,
+            WN_LSF = BDT_WEEK + 3,
+            DN = 2,
+        ),
+    )
+    @test !has_rinex_ephemeris(b1c)
+    header = add_header_records!(RinexNavHeader(), b1c; approximate_year = YEAR)
+    @test isempty(header.ionospheric_corrections)
+    utc = only(header.time_system_corrections)
+    @test (utc.type, utc.reference_time, utc.reference_week) == ("BDUT", 518400, BDT_WEEK)
+    leap = header.leap_seconds
+    @test (leap.count, leap.week, leap.day, leap.time_system) == (4, BDT_WEEK + 3, 2, "BDT")
 end
