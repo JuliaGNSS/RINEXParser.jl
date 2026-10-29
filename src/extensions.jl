@@ -3,7 +3,7 @@
 # on, and are defined here so that the extensions have something to add to.
 
 """
-    rinex_ephemeris(decoder; week = nothing)
+    rinex_ephemeris(decoder; approximate_year)
         -> Union{Nothing,GPSEphemeris,GalileoEphemeris,BeiDouEphemeris}
 
 The navigation record of a GNSSDecoder `GNSSDecoderState`, for
@@ -13,14 +13,16 @@ Records exist for GPS LNAV (L1 C/A), Galileo I/NAV (E1-B, E5b) and F/NAV
 (E5a), and BDS D1/D2 (B1I, B3I). The GPS CNAV and CNAV-2 (L5, L2C, L1C),
 BDS B-CNAV (B1C, B2a, B2b) and Galileo C/NAV (E6) messages have no RINEX
 3.05 record (it arrived with RINEX 4), so those decoders give `nothing`, as
-does a message not yet complete for positioning; [`has_rinex_ephemeris`](@ref)
-tells the two apart.
+does a message not yet complete for positioning or without a decoded week;
+[`has_rinex_ephemeris`](@ref) tells the two apart.
 
-`week` is the continuous week on the constellation's own count (the GPS,
-GST or BDT week), as GNSSDecoder's
-`get_broadcast_week(decoder; approximate_year)` returns it. It defaults to
-the decoded one for Galileo and BDS; GPS LNAV broadcasts only 10 bits of it,
-so a GPS decoder needs it given.
+The record's week is the one the decoder's message broadcasts,
+`get_broadcast_week(decoder; approximate_year)`: GPS LNAV broadcasts its week
+in 10 bits, and `approximate_year`, the year of the observation to within
+±9 years, picks the 1024-week cycle. Every other message broadcasts its whole
+week and leaves `approximate_year` unread, but it is required on every
+decoder, as in GNSSDecoder, so a call reads the same whatever decoder it is
+handed.
 
 The decoded values are converted to the record's units and conventions:
 issue-of-data and health words, accuracy indices to meters, the fit-interval
@@ -42,7 +44,7 @@ for never does.
 function has_rinex_ephemeris end
 
 """
-    add_header_records!(header::RinexNavHeader, decoder; week = nothing) -> header
+    add_header_records!(header::RinexNavHeader, decoder; approximate_year) -> header
 
 Add the navigation-header records a GNSSDecoder `GNSSDecoderState` has
 decoded to `header`: the ionospheric corrections (Klobuchar for GPS and
@@ -55,7 +57,7 @@ once every 12.5 minutes - so a writer collects them from every decoder
 until the header is written:
 
     header = RinexNavHeader(; satellite_system)
-    foreach(decoder -> add_header_records!(header, decoder; week), decoders)
+    foreach(decoder -> add_header_records!(header, decoder; approximate_year), decoders)
     header_written(writer) || set_header!(writer, header)
 
 A record replaces one of the same type - for BDS, of the same type, time
@@ -64,10 +66,12 @@ leap seconds, the record counted in GPS time is kept over BDS's, which
 counts BDT, and a record announcing the next leap-second event over one that
 does not, as some parsers require it.
 
-`week` is the one [`rinex_ephemeris`](@ref) takes. The reference weeks that
-are broadcast truncated - the 8-bit UTC and leap-second weeks, Galileo's
-6-bit GGTO week - are resolved against it into the continuous week a header
-record carries, aligned with the GPS week for Galileo.
+`approximate_year` is the one [`rinex_ephemeris`](@ref) takes. The reference
+weeks that are broadcast truncated - the 8-bit UTC and leap-second weeks,
+Galileo's 6-bit GGTO week - are resolved against the decoder's week into the
+continuous week a header record carries, aligned with the GPS week for
+Galileo; until the decoder has a week, the records that need one are left
+out.
 """
 function add_header_records! end
 

@@ -40,22 +40,10 @@ satellite_system(::GPSData) = 'G'
 satellite_system(::GalileoData) = 'E'
 satellite_system(::BeiDouData) = 'C'
 
-# The continuous week of a message on its constellation's own count: the one
-# given, or the decoded one where the message broadcasts all of it.
-message_week(decoder, week::Integer) = Int(week)
-message_week(decoder, ::Nothing) = decoder.data.WN
-message_week(::GNSSDecoderState{<:GPSData}, ::Nothing) = throw(
-    ArgumentError(
-        "GPS LNAV broadcasts its week in 10 bits, so the continuous week of a GPS " *
-        "decoder has to be given, e.g. as week = " *
-        "get_broadcast_week(decoder; approximate_year)",
-    ),
-)
-
 # The continuous week a header record of the message counts: aligned with
 # the GPS week for Galileo. `nothing` before the week was decoded.
-function header_week(decoder, week)
-    week = message_week(decoder, week)
+function header_week(decoder, approximate_year)
+    week = get_broadcast_week(decoder; approximate_year)
     isnothing(week) && return nothing
     first(RINEXParser.record_week(satellite_system(decoder.data), week))
 end
@@ -64,18 +52,28 @@ end
 has_rinex_ephemeris(::GNSSDecoderState) = false
 has_rinex_ephemeris(::GNSSDecoderState{<:Union{GPSData,GalileoData,BeiDouData}}) = true
 
-rinex_ephemeris(::GNSSDecoderState; week = nothing) = nothing
+rinex_ephemeris(::GNSSDecoderState; approximate_year::Integer) = nothing
 
-function rinex_ephemeris(decoder::GNSSDecoderState{<:GPSData}; week = nothing)
-    is_decoding_completed_for_positioning(decoder) || return nothing
+# The week, transmission time and reference times of a record, or `nothing`
+# before the message has dated itself with a week.
+function record_times(decoder, approximate_year)
+    week = get_broadcast_week(decoder; approximate_year)
+    isnothing(week) && return nothing
     data = decoder.data
-    times = navigation_times(
-        'G';
-        week = message_week(decoder, week),
+    navigation_times(
+        satellite_system(data);
+        week,
         transmission_time = get_broadcast_time_of_week(decoder),
         toe = data.t_0e,
         toc = data.t_0c,
     )
+end
+
+function rinex_ephemeris(decoder::GNSSDecoderState{<:GPSData}; approximate_year::Integer)
+    is_decoding_completed_for_positioning(decoder) || return nothing
+    times = record_times(decoder, approximate_year)
+    isnothing(times) && return nothing
+    data = decoder.data
     GPSEphemeris(;
         prn = decoder.prn,
         toc = times.toc,
@@ -183,16 +181,14 @@ galileo_bgd_e5b_e1(::GNSSDecoder.GalileoE5aData) = 0.0
 galileo_sisa(data::GNSSDecoder.GalileoINAVData) = sisa_metres(data.SISA_E1_E5b)
 galileo_sisa(data::GNSSDecoder.GalileoE5aData) = sisa_metres(data.SISA_E1_E5a)
 
-function rinex_ephemeris(decoder::GNSSDecoderState{<:GalileoData}; week = nothing)
+function rinex_ephemeris(
+    decoder::GNSSDecoderState{<:GalileoData};
+    approximate_year::Integer,
+)
     is_decoding_completed_for_positioning(decoder) || return nothing
+    times = record_times(decoder, approximate_year)
+    isnothing(times) && return nothing
     data = decoder.data
-    times = navigation_times(
-        'E';
-        week = message_week(decoder, week),
-        transmission_time = get_broadcast_time_of_week(decoder),
-        toe = data.t_0e,
-        toc = data.t_0c,
-    )
     GalileoEphemeris(;
         prn = decoder.prn,
         toc = times.toc,
@@ -226,18 +222,13 @@ function rinex_ephemeris(decoder::GNSSDecoderState{<:GalileoData}; week = nothin
     )
 end
 
-function rinex_ephemeris(decoder::GNSSDecoderState{<:BeiDouData}; week = nothing)
+function rinex_ephemeris(decoder::GNSSDecoderState{<:BeiDouData}; approximate_year::Integer)
     is_decoding_completed_for_positioning(decoder) || return nothing
-    data = decoder.data
     # Every time of a BDS record is BDT: seconds of the BDT week, and the
     # calendar epoch they make with the week is BDT's too.
-    times = navigation_times(
-        'C';
-        week = message_week(decoder, week),
-        transmission_time = get_broadcast_time_of_week(decoder),
-        toe = data.t_0e,
-        toc = data.t_0c,
-    )
+    times = record_times(decoder, approximate_year)
+    isnothing(times) && return nothing
+    data = decoder.data
     BeiDouEphemeris(;
         prn = decoder.prn,
         toc = times.toc,
@@ -275,21 +266,22 @@ end
 # Navigation-file header
 
 # Messages that carry no header records, and the ones that do.
-add_header_records!(header::RinexNavHeader, ::GNSSDecoderState; week = nothing) = header
+add_header_records!(header::RinexNavHeader, ::GNSSDecoderState; approximate_year::Integer) =
+    header
 
 function add_header_records!(
     header::RinexNavHeader,
     decoder::GNSSDecoderState{<:Union{GPSData,GalileoData,BeiDouData}};
-    week = nothing,
+    approximate_year::Integer,
 )
     for correction in ionospheric_corrections(decoder)
         replace_record!(header.ionospheric_corrections, correction, ionospheric_key)
     end
-    corrections = time_system_corrections(decoder.data, () -> header_week(decoder, week))
-    for correction in corrections
+    week = header_week(decoder, approximate_year)
+    for correction in time_system_corrections(decoder.data, week)
         replace_record!(header.time_system_corrections, correction, c -> c.type)
     end
-    leap_seconds = broadcast_leap_seconds(decoder.data, () -> header_week(decoder, week))
+    leap_seconds = broadcast_leap_seconds(decoder.data, week)
     preferred_leap_seconds(header.leap_seconds, leap_seconds) &&
         (header.leap_seconds = leap_seconds)
     header
@@ -343,8 +335,7 @@ end
 # Broadcast reference weeks arrive truncated - the UTC and leap-second weeks
 # to 8 bits, Galileo's GGTO week to 6 - while a header record wants the
 # continuous week. Each is lifted to the representative nearest the
-# message's own continuous week, which `week()` gives: it is asked only for a
-# record that needs it, as a GPS decoder cannot give one without help.
+# message's own continuous week, `week`, `nothing` before one was decoded.
 const UTC_WN_MODULUS = 256
 const GGTO_WN_MODULUS = 64
 
@@ -357,16 +348,8 @@ function resolve_reference_week(truncated, week, modulus)
 end
 
 function time_system_correction(type, a0, a1, t_0, WN_0, week, modulus)
-    any(isnothing, (a0, a1, t_0, WN_0)) && return nothing
-    continuous = week()
-    isnothing(continuous) && return nothing
-    TimeSystemCorrection(
-        type,
-        a0,
-        a1,
-        t_0,
-        resolve_reference_week(WN_0, continuous, modulus),
-    )
+    (any(isnothing, (a0, a1, t_0, WN_0)) || isnothing(week)) && return nothing
+    TimeSystemCorrection(type, a0, a1, t_0, resolve_reference_week(WN_0, week, modulus))
 end
 
 time_system_corrections(data::GPSData, week) = filter(
@@ -407,12 +390,10 @@ time_system_corrections(data::GalileoData, week) = filter(
     ],
 )
 function time_system_corrections(data::BeiDouData, week)
-    isnothing(data.A_0UTC) && return TimeSystemCorrection[]
-    continuous = week()
-    isnothing(continuous) && return TimeSystemCorrection[]
+    (isnothing(data.A_0UTC) || isnothing(week)) && return TimeSystemCorrection[]
     # D1/D2 broadcasts no reference epoch for its UTC offset, so the record's
     # reference time is zero of the current BDT week.
-    [TimeSystemCorrection("BDUT", data.A_0UTC, data.A_1UTC, 0, continuous)]
+    [TimeSystemCorrection("BDUT", data.A_0UTC, data.A_1UTC, 0, week)]
 end
 
 # The broadcast leap seconds, as the full record RINEX prefers (current
@@ -423,14 +404,12 @@ end
 function broadcast_leap_seconds(data, week)
     isnothing(data.Δt_LS) && return nothing
     time_system = data isa BeiDouData ? "BDT" : ""
-    any(isnothing, (data.Δt_LSF, data.WN_LSF, data.DN)) &&
+    (any(isnothing, (data.Δt_LSF, data.WN_LSF, data.DN)) || isnothing(week)) &&
         return LeapSeconds(Int(data.Δt_LS); time_system)
-    continuous = week()
-    isnothing(continuous) && return LeapSeconds(Int(data.Δt_LS); time_system)
     LeapSeconds(
         Int(data.Δt_LS);
         future_count = Int(data.Δt_LSF),
-        week = resolve_reference_week(data.WN_LSF, continuous, UTC_WN_MODULUS),
+        week = resolve_reference_week(data.WN_LSF, week, UTC_WN_MODULUS),
         day = Int(data.DN),
         time_system,
     )

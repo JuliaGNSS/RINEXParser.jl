@@ -124,20 +124,22 @@ end
 ## From GNSSDecoder and GNSSSignals
 
 With GNSSDecoder.jl and GNSSSignals.jl loaded,
-`rinex_ephemeris(decoder; week)` converts a decoded navigation message into
-its record, and `add_header_records!(header, decoder; week)` collects the
-corrections and leap seconds it carries. `week` is the continuous week on the
-constellation's own count, which GNSSDecoder's
-`get_broadcast_week(decoder; approximate_year)` gives.
+`rinex_ephemeris(decoder; approximate_year)` converts a decoded navigation
+message into its record, and `add_header_records!(header, decoder;
+approximate_year)` collects the corrections and leap seconds it carries.
+`approximate_year`, the year of the observation, resolves the 1024-week
+rollover of the GPS L1 C/A week through GNSSDecoder's `get_broadcast_week`;
+it is required for every decoder, as there.
 
 ```julia
+using GNSSDecoder, GNSSSignals, RINEXParser
+
 header = RinexNavHeader(; satellite_system = 'G')
 RinexNavWriter("data.nav"; overflow = :skip) do writer
     for decoder in decoders
-        week = get_broadcast_week(decoder; approximate_year = 2026)
-        add_header_records!(header, decoder; week)
+        add_header_records!(header, decoder; approximate_year = 2026)
         header_written(writer) || set_header!(writer, header)
-        eph = rinex_ephemeris(decoder; week)
+        eph = rinex_ephemeris(decoder; approximate_year = 2026)
         isnothing(eph) || write_ephemeris!(writer, eph)
     end
 end

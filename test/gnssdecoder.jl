@@ -4,6 +4,7 @@
 # GPS week 2124 (the week 10-bit `WN = 76` resolves to around mid-2020) starts on
 # Sunday 2020-09-20; the reference times below are four days into it.
 const GPS_WEEK = 2124
+const YEAR = 2020
 const GPS_TOW = 4 * 86400
 const GPS_TOC = DateTime(2020, 9, 24)
 
@@ -148,13 +149,14 @@ decoder_with(system, prn, data) = GNSSDecoder.GNSSDecoderState(
 @testset "GPS LNAV ephemeris record" begin
     decoder = decoder_with(GPSL1CA(), 13, gps_lnav_data())
     @test is_decoding_completed_for_positioning(decoder)
-    eph = rinex_ephemeris(decoder; week = GPS_WEEK)
+    eph = rinex_ephemeris(decoder; approximate_year = YEAR)
     @test eph isa GPSEphemeris
     @test eph.prn == 13
-    # The 10-bit broadcast week leaves the cycle to the caller, so a GPS
-    # decoder needs the continuous week given.
-    @test_throws ArgumentError rinex_ephemeris(decoder)
+    # The 10-bit broadcast week leaves the cycle to the year of the
+    # observation, which every decoder is given.
+    @test_throws UndefKeywordError rinex_ephemeris(decoder)
     @test eph.week == GPS_WEEK
+    @test rinex_ephemeris(decoder; approximate_year = 2001).week == GPS_WEEK - 1024
     @test eph.toc == GPS_TOC
     # Clock polynomial and group delay pass through unscaled.
     @test eph.af0 == -2.989266067743e-5
@@ -192,16 +194,16 @@ decoder_with(system, prn, data) = GNSSDecoder.GNSSDecoderState(
     # hours.
     @test eph.fit_interval == 4.0
     extended = decoder_with(GPSL1CA(), 13, gps_lnav_data(; fit_interval = true))
-    @test rinex_ephemeris(extended; week = GPS_WEEK).fit_interval == 6.0
+    @test rinex_ephemeris(extended; approximate_year = YEAR).fit_interval == 6.0
     # An unhealthy satellite's 6-bit health word is written as the number it
     # encodes.
     unhealthy = decoder_with(GPSL1CA(), 13, gps_lnav_data(; sv_health = 0b111111))
-    @test rinex_ephemeris(unhealthy; week = GPS_WEEK).sv_health == 63
+    @test rinex_ephemeris(unhealthy; approximate_year = YEAR).sv_health == 63
     # User range accuracy across both segments of IS-GPS-200 Table 20-I, and
     # the index that means no prediction is available.
     accuracy(index) = rinex_ephemeris(
         decoder_with(GPSL1CA(), 13, gps_lnav_data(; URA_index = index));
-        week = GPS_WEEK,
+        approximate_year = YEAR,
     ).sv_accuracy
     @test accuracy(6) == 16.0
     @test accuracy(7) == 32.0
@@ -219,8 +221,13 @@ end
     # A partially decoded message would write zeros into the record.
     partial = decoder_with(GPSL1CA(), 13, gps_lnav_data(; sqrt_A = nothing))
     @test !is_decoding_completed_for_positioning(partial)
-    @test isnothing(rinex_ephemeris(partial; week = GPS_WEEK))
-    @test isnothing(rinex_ephemeris(GNSSDecoderState(GalileoE1B(), 24)))
+    @test isnothing(rinex_ephemeris(partial; approximate_year = YEAR))
+    @test isnothing(
+        rinex_ephemeris(GNSSDecoderState(GalileoE1B(), 24); approximate_year = YEAR),
+    )
+    # And without a decoded week a record cannot be dated.
+    weekless = decoder_with(GalileoE1B(), 24, galileo_inav_data(; WN = nothing))
+    @test isnothing(rinex_ephemeris(weekless; approximate_year = YEAR))
     # It will have one once it is complete.
     @test has_rinex_ephemeris(partial)
     @test has_rinex_ephemeris(GNSSDecoderState(GalileoE1B(), 24))
@@ -232,7 +239,7 @@ end
     # `toe`, and the transmission time on that week's count.
     ahead = rinex_ephemeris(
         decoder_with(GPSL1CA(), 13, gps_lnav_data(; TOW = 604000, t_0e = 0, t_0c = 0));
-        week = GPS_WEEK,
+        approximate_year = YEAR,
     )
     @test ahead.week == GPS_WEEK + 1
     @test ahead.toc == GPS_TOC + Day(3)
@@ -244,7 +251,8 @@ end
             GalileoE1B(),
             24,
             galileo_inav_data(; TOW = 30, t_0e = 597600.0, t_0c = 597600.0),
-        ),
+        );
+        approximate_year = YEAR,
     )
     @test behind.week == GPS_WEEK - 1
     @test behind.toc == GPS_TOC - Day(11) + Second(597600)
@@ -253,14 +261,13 @@ end
 
 @testset "Galileo ephemeris records" begin
     decoder = decoder_with(GalileoE1B(), 24, galileo_inav_data())
-    eph = rinex_ephemeris(decoder)
+    eph = rinex_ephemeris(decoder; approximate_year = YEAR)
     @test eph isa GalileoEphemeris
     @test eph.prn == 24
     # Galileo's 12-bit week counts from GPS week 1024, so the record's week is
-    # GPS-aligned; the decoded week is the default, and a given one is on
-    # Galileo's own count, as GNSSDecoder's `get_broadcast_week` gives it.
+    # GPS-aligned. The week is broadcast whole, so the year is not read.
     @test eph.week == GPS_WEEK
-    @test rinex_ephemeris(decoder; week = GPS_WEEK - 1024) == eph
+    @test rinex_ephemeris(decoder; approximate_year = 2001) == eph
     @test eph.toc == GPS_TOC
     @test eph.iodnav == 37
     @test eph.bgd_e5a_e1 == 2.7939677238e-9
@@ -269,7 +276,7 @@ end
     @test eph.data_sources == 1 + 512
     # The same message decoded from E5b says so: bit 2 instead of bit 0.
     e5b = decoder_with(GalileoE5bI(), 24, galileo_inav_data())
-    @test rinex_ephemeris(e5b).data_sources == 4 + 512
+    @test rinex_ephemeris(e5b; approximate_year = YEAR).data_sources == 4 + 512
     # SISA index 107 falls in the fourth segment of Table 92: 2 m + 0.16 m per
     # step.
     @test eph.sisa ≈ 2.0 + 0.16 * 7
@@ -291,18 +298,19 @@ end
             E1B_DVS = GNSSDecoder.working_without_guarantee,
         ),
     )
-    @test rinex_ephemeris(degraded).sv_health == 0b011
+    @test rinex_ephemeris(degraded; approximate_year = YEAR).sv_health == 0b011
     e5b_down = decoder_with(
         GalileoE1B(),
         24,
         galileo_inav_data(; E5b_SHS = GNSSDecoder.signal_out_of_service),
     )
-    @test rinex_ephemeris(e5b_down).sv_health == 0b010_000_000
+    @test rinex_ephemeris(e5b_down; approximate_year = YEAR).sv_health == 0b010_000_000
 
     # Signal-in-space accuracy across every segment of the table, plus the
     # two ranges that mean no prediction is available.
     sisa(index) = rinex_ephemeris(
-        decoder_with(GalileoE1B(), 24, galileo_inav_data(; SISA_E1_E5b = index)),
+        decoder_with(GalileoE1B(), 24, galileo_inav_data(; SISA_E1_E5b = index));
+        approximate_year = YEAR,
     ).sisa
     @test sisa(0) == 0.0
     @test sisa(49) ≈ 0.49
@@ -318,7 +326,7 @@ end
 
 @testset "BeiDou D1 ephemeris record" begin
     decoder = decoder_with(BeiDouB1I(), 21, beidou_dnav_data())
-    eph = rinex_ephemeris(decoder)
+    eph = rinex_ephemeris(decoder; approximate_year = YEAR)
     @test eph isa BeiDouEphemeris
     @test eph.prn == 21
     # BDS counts its own weeks from its own origin, so the record's week is
@@ -338,8 +346,10 @@ end
     # range means "use at own risk" and is 8192 m, not the negative accuracy
     # GPS and Galileo report for an accuracy that was never predicted.
     @test eph.sv_accuracy == 2.0
-    accuracy(index) =
-        rinex_ephemeris(decoder_with(BeiDouB1I(), 21, beidou_dnav_data(; URAI = index))).sv_accuracy
+    accuracy(index) = rinex_ephemeris(
+        decoder_with(BeiDouB1I(), 21, beidou_dnav_data(; URAI = index));
+        approximate_year = YEAR,
+    ).sv_accuracy
     @test accuracy(14) == 4096.0
     @test accuracy(15) == 8192.0
 
@@ -348,7 +358,8 @@ end
     # before, which its `toe` belongs to.
     @test eph.transmission_time == Float64(BDT_SOW + 65)
     rolled = rinex_ephemeris(
-        decoder_with(BeiDouB1I(), 21, beidou_dnav_data(; SOW = 30, t_0e = 604000)),
+        decoder_with(BeiDouB1I(), 21, beidou_dnav_data(; SOW = 30, t_0e = 604000));
+        approximate_year = YEAR,
     )
     @test rolled.transmission_time == 30 + 604800
     @test rolled.week == BDT_WEEK - 1
@@ -363,11 +374,13 @@ end
     # GPS L5 and L2C and BDS B1C broadcast a quasi-Keplerian ephemeris RINEX
     # 3.05 cannot express, so those decoders yield no record.
     for system in (GPSL5I(), GPSL2CM())
-        @test isnothing(rinex_ephemeris(GNSSDecoderState(system, 3); week = GPS_WEEK))
+        @test isnothing(
+            rinex_ephemeris(GNSSDecoderState(system, 3); approximate_year = YEAR),
+        )
         @test !has_rinex_ephemeris(GNSSDecoderState(system, 3))
     end
     b1c = decoder_with(BeiDouB1C_D(), 21, GNSSDecoder.BeiDouB1CData())
-    @test isnothing(rinex_ephemeris(b1c))
+    @test isnothing(rinex_ephemeris(b1c; approximate_year = YEAR))
     @test !has_rinex_ephemeris(b1c)
     @test has_rinex_ephemeris(GNSSDecoderState(GalileoE5aI(), 24))
     @test has_rinex_ephemeris(GNSSDecoderState(BeiDouB1I(), 21))
@@ -397,7 +410,7 @@ gps_page_18(; kwargs...) = gps_lnav_data(;
 
 @testset "navigation-header records of GPS" begin
     gps = decoder_with(GPSL1CA(), 13, gps_page_18())
-    header = add_header_records!(RinexNavHeader(), gps; week = GPS_WEEK)
+    header = add_header_records!(RinexNavHeader(), gps; approximate_year = YEAR)
     iono = header.ionospheric_corrections
     @test [c.type for c in iono] == ["GPSA", "GPSB"]
     @test iono[1].parameters ==
@@ -417,28 +430,43 @@ gps_page_18(; kwargs...) = gps_lnav_data(;
 
     # Collected again from the same message, or a newer one, a record is
     # replaced rather than repeated.
-    add_header_records!(header, gps; week = GPS_WEEK)
+    add_header_records!(header, gps; approximate_year = YEAR)
     newer = decoder_with(GPSL1CA(), 5, gps_page_18(; α_0 = 2.0e-8))
-    add_header_records!(header, newer; week = GPS_WEEK)
+    add_header_records!(header, newer; approximate_year = YEAR)
     @test [c.type for c in header.ionospheric_corrections] == ["GPSA", "GPSB"]
     @test header.ionospheric_corrections[1].parameters[1] == 2.0e-8
     @test length(header.time_system_corrections) == 1
 
-    # A satellite that has not sent page 18 yet contributes nothing, and
-    # needs no week for that.
-    empty =
-        add_header_records!(RinexNavHeader(), decoder_with(GPSL1CA(), 13, gps_lnav_data()))
+    # A satellite that has not sent page 18 yet contributes nothing.
+    empty = add_header_records!(
+        RinexNavHeader(),
+        decoder_with(GPSL1CA(), 13, gps_lnav_data());
+        approximate_year = YEAR,
+    )
     @test isempty(empty.ionospheric_corrections)
     @test isempty(empty.time_system_corrections)
     @test isnothing(empty.leap_seconds)
-    # The UTC week cannot be resolved without the cycle of the GPS week.
-    @test_throws ArgumentError add_header_records!(RinexNavHeader(), gps)
+    # Without the decoder's week the truncated weeks cannot be resolved: the
+    # UTC record is left out, and the leap seconds are the count alone.
+    weekless = add_header_records!(
+        RinexNavHeader(),
+        decoder_with(GPSL1CA(), 13, gps_page_18(; WN = nothing));
+        approximate_year = YEAR,
+    )
+    @test length(weekless.ionospheric_corrections) == 2
+    @test isempty(weekless.time_system_corrections)
+    @test isnothing(weekless.leap_seconds.week)
+    @test_throws UndefKeywordError add_header_records!(RinexNavHeader(), gps)
     # A message without header records leaves the header as it was.
-    @test add_header_records!(header, GNSSDecoderState(GPSL5I(), 3)) === header
+    @test add_header_records!(
+        header,
+        GNSSDecoderState(GPSL5I(), 3);
+        approximate_year = YEAR,
+    ) === header
 
     # The header is written as it was collected.
     lines = written_lines(RinexNavWriter, header) do writer
-        write_ephemeris!(writer, rinex_ephemeris(gps; week = GPS_WEEK))
+        write_ephemeris!(writer, rinex_ephemeris(gps; approximate_year = YEAR))
     end
     @test count(l -> label(l) == "IONOSPHERIC CORR", lines) == 2
     @test only(filter(l -> label(l) == "LEAP SECONDS", lines))[1:24] ==
@@ -465,7 +493,7 @@ end
             WN_0G = 12,
         ),
     )
-    header = add_header_records!(RinexNavHeader(), galileo)
+    header = add_header_records!(RinexNavHeader(), galileo; approximate_year = YEAR)
     iono = only(header.ionospheric_corrections)
     @test iono.type == "GAL"
     @test iono.parameters == (4.5e1, 1.5625e-2, -3.0517578125e-3)
@@ -474,7 +502,7 @@ end
     # The UTC week is broadcast in 8 bits and the GGTO week in 6 (12 is week
     # 2124 mod 64); both are written as the continuous week aligned with GPS.
     @test [c.reference_week for c in corrections] == [GPS_WEEK, GPS_WEEK]
-    @test add_header_records!(RinexNavHeader(), galileo; week = GPS_WEEK - 1024).time_system_corrections ==
+    @test add_header_records!(RinexNavHeader(), galileo; approximate_year = 2001).time_system_corrections ==
           corrections
 end
 
@@ -492,7 +520,11 @@ end
         A_1UTC = -7.1054273576e-15,
         Δt_LS = 4,
     )
-    header = add_header_records!(RinexNavHeader(), decoder_with(BeiDouB1I(), 21, data))
+    header = add_header_records!(
+        RinexNavHeader(),
+        decoder_with(BeiDouB1I(), 21, data);
+        approximate_year = YEAR,
+    )
     iono = header.ionospheric_corrections
     @test [c.type for c in iono] == ["BDSA", "BDSB"]
     # The BDS ionosphere records carry the transmission the coefficients
@@ -502,7 +534,11 @@ end
     @test all(c -> c.sv_id == 21 && c.time_mark == 'A', iono)
     # Several sets a day are told apart by when and by whom they were sent,
     # so another satellite's set is a record of its own.
-    add_header_records!(header, decoder_with(BeiDouB1I(), 22, data))
+    add_header_records!(
+        header,
+        decoder_with(BeiDouB1I(), 22, data);
+        approximate_year = YEAR,
+    )
     @test length(header.ionospheric_corrections) == 4
     utc = only(header.time_system_corrections)
     @test utc.type == "BDUT"
@@ -518,13 +554,20 @@ end
     # BDT week.
     event =
         beidou_dnav_data(; Δt_LS = 4, Δt_LSF = 5, WN_LSF = mod(BDT_WEEK + 3, 256), DN = 2)
-    @test add_header_records!(RinexNavHeader(), decoder_with(BeiDouB1I(), 21, event)).leap_seconds.week ==
-          BDT_WEEK + 3
+    @test add_header_records!(
+        RinexNavHeader(),
+        decoder_with(BeiDouB1I(), 21, event);
+        approximate_year = YEAR,
+    ).leap_seconds.week == BDT_WEEK + 3
     # Without a second of week there is no mark to give, so no record is
     # claimed.
     unmarked = beidou_dnav_data(; SOW = nothing, α_0 = 1.0e-8)
     @test isempty(
-        add_header_records!(RinexNavHeader(), decoder_with(BeiDouB1I(), 21, unmarked)).ionospheric_corrections,
+        add_header_records!(
+            RinexNavHeader(),
+            decoder_with(BeiDouB1I(), 21, unmarked);
+            approximate_year = YEAR,
+        ).ionospheric_corrections,
     )
 end
 
@@ -533,19 +576,16 @@ end
     bds = decoder_with(BeiDouB1I(), 21, beidou_dnav_data(; Δt_LS = 4))
     for decoders in ((gps, bds), (bds, gps))
         header = RinexNavHeader()
-        foreach(
-            d -> add_header_records!(header, d; week = d === gps ? GPS_WEEK : nothing),
-            decoders,
-        )
+        foreach(d -> add_header_records!(header, d; approximate_year = YEAR), decoders)
         @test header.leap_seconds.count == 18
     end
     # And a record announcing the next event over one that does not.
     header = RinexNavHeader()
-    add_header_records!(header, gps; week = GPS_WEEK)
+    add_header_records!(header, gps; approximate_year = YEAR)
     add_header_records!(
         header,
         decoder_with(GPSL1CA(), 5, gps_lnav_data(; Δt_LS = 18));
-        week = GPS_WEEK,
+        approximate_year = YEAR,
     )
     @test header.leap_seconds.week == 2185
 end
